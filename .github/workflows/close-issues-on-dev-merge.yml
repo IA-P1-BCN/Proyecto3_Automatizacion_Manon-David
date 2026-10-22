@@ -1,0 +1,33 @@
+name: Close completed issues after dev merge
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-issues-dev-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close-issues:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted base revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Close explicitly completed issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { closeCompletedIssues } = require('./.github/scripts/close-completed-issues.cjs');
+            await closeCompletedIssues({ github, context, core });
