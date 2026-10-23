@@ -2,7 +2,7 @@
 
 ## Scope and ownership
 
-Agent instructions correspond to issue **#17 — Crear Agents.md**, assigned to `davidlafuentem` when checked. The user also requested this supporting merge-to-completion automation; a dedicated issue number for that extension has not been provided. Do not invent one or close unrelated issues such as #18 — Crear Bitacora merely because an activity entry was added to the log.
+Agent instructions correspond to issue **#17 — Crear Agents.md**, assigned to `davidlafuentem` when checked. The user also requested this supporting merge-to-completion automation; a dedicated issue number for that extension has not been provided. Do not invent one. Creating the AI log belongs to **#18 — Crear Bitacora**, which has its own branch and delivery; PR #25 must close only #17.
 
 The team board is [IA-P1-BCN Project #43](https://github.com/orgs/IA-P1-BCN/projects/43). GitHub's default branch is currently `main`, so native closing keywords alone do not close issues when a PR is merged into `dev`.
 
