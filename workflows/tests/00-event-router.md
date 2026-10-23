@@ -27,9 +27,42 @@ Run on 2026-10-23 in a clean throwaway n8n 2.44.5 container (not the team's inst
 
 ### Run on the team's n8n (reported by Manon, 2026-10-23)
 
-With the stubs linked and everything published, the seven payloads and the real app's reservation and deposit events behaved as expected. Still pending: the flow 08 alert for #6 and #7 (waiting for PR #31), and the failing-handler tests.
+With the stubs linked and everything published, the seven payloads and the real app's reservation and deposit events behaved as expected. Payloads 6 and 7 each failed the router and produced a flow 08 alert email (task 2.3 done, 2026-10-23). Still pending: the failing-handler tests.
 
-Not covered by this run: flow 08 attached to the router (alert email), a failing handler followed by another event, and events sent by the real app. Those are tasks 2.2, 2.3 and 3.x.
+Not covered by the throwaway run: flow 08 attached to the router, a failing handler followed by another event (tasks 3.1 and 3.2), and the real app's events (covered by the team's run).
+
+## PowerShell commands
+
+Run from any PowerShell window while the router is published. The `$url` line is shared by all commands. Payloads 1 and 2 contain accents, so they are sent as UTF-8 bytes.
+
+```powershell
+$url = 'http://localhost:5678/webhook/tienda'
+
+# 1 · apartado.creado
+$body = '{"evento": "apartado.creado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 10.0, "pendiente": 79.9}}'
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+
+# 2 · abono.registrado
+$body = '{"evento": "abono.registrado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 30.0, "pendiente": 59.9, "importe": 20.0}}'
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+
+# 3 · venta.registrada
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "venta.registrada", "datos": {"id": 257, "fecha": "2026-10-20", "concepto": "Crema calzado", "importe": 4.5, "forma_pago": "efectivo"}}'
+
+# 4 · apartado.vencido
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "apartado.vencido", "datos": {"apartado": {"id": 16, "cliente": "Paula Ramos", "estado": "vencido"}, "vale": {"id": 2, "codigo": "VALE-00016", "importe": 5.0}}}'
+
+# 5 · unknown event
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "cosa.rara", "datos": {}}'
+
+# 6 · no evento (must fail and alert)
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"datos": {"id": 1}}'
+
+# 7 · not JSON (must fail and alert)
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'text/plain' -Body 'esto no es json'
+```
+
+Every command prints `message: Workflow was started`, even for 6 and 7: the router answers first and fails afterwards. Check the outcome in n8n's Executions list.
 
 ## Setup after importing
 
