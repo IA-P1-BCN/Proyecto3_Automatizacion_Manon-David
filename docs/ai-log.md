@@ -156,6 +156,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** Unit tests of the Code node pass. Manon reported on the team's n8n: receipts for a partial and a final deposit, the shop alert for an empty email and for an email without `@`, successful executions, deposits from the app screen and the API, two deposits in a row, and flow 08's alert after breaking the SMTP credential. Details in `workflows/tests/02-deposit-receipt.md`. Not run by the agent: any n8n execution.
 - **Remaining work at handoff:** screenshots in `docs/evidence/02-deposit-receipt/`, the README text from `docs/README-changes.md`, opening the PR to `dev` with `Closes #2`, and David's review.
 
+### AI-010 — Flow 01 Reservation Confirmation (#1)
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** [#1 — HU-01 · Confirmación al apartar](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/1); PR not opened yet.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "pull dev and let's start HU 1"; `/opsx:apply add-reservation-confirmation`; Manon pasted the PowerShell test payloads back to run them; "also test with [a test inbox]"; "all 4 emails arrived and look right, tick the tasks"; "2.2 / successfull"; "2.3: I will not break the SMTP, don't ask again"; "3.1 3.3, go ahead".
+- **Accepted suggestions and reasons:** The formatting and message texts live in a tested Code node source (`workflows/code/01-format-confirmation.js`, 9 unit tests), modelled on flow 02, so the flow never recalculates the app's figures. The committed flow is the n8n export stripped of credential references, the flow 08 ID and instance data; its Code node is identical to the repo source.
+- **Rejected / deferred suggestions and reasons:** Task 2.3 (breaking the SMTP credential on purpose) was declined by Manon and is left unticked; execution 44 showed flow 08 alerting after a real SMTP rejection, but that is not the specified test. Shared formatting sub-workflow with flow 02 stays deferred.
+- **Agent errors and corrections:** A shell heredoc containing the Spanish text failed on Windows and the files were rewritten with the Write tool. The first PowerShell loop got a 422 on payload 1 that was not explained; re-sending the same payload worked. The first run used the placeholder `example.com` address, which rejects mail (nullMX), so flow 01 failed and flow 08 alerted; real tests used a test inbox. The generated JSON differs from the n8n export in node IDs and positions, so `workflows/code/build-01-reservation-confirmation.js` is a reference, not the source of the committed file.
+- **Verification and evidence:** Unit tests pass. The agent sent the payloads through the router on the team's n8n: payloads 1 to 4 gave four successful flow 01 executions and four emails that Manon confirmed arrived with the right content; payloads 5 and 6 (no email, email without `@`) gave successful executions and Manon confirmed the shop alerts; payload 8 (no `precio`) failed flow 01 and ran flow 08. Details in `workflows/tests/01-reservation-confirmation.md`. The agent cannot read inboxes.
+- **Remaining work at handoff:** screenshots of the received emails in `docs/evidence/01-reservation-confirmation/` and the README text (task 3.2), opening the PR to `dev` with `Closes #1`, David's review, and syncing the issue tasks.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
