@@ -1,6 +1,6 @@
 # README changes to apply
 
-`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
+`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow` and task 4.2 of `openspec/changes/add-event-router`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
 
 ## 1. Credentials and variables used by flow 08 (task 5.1)
 
@@ -32,3 +32,22 @@ And the setup step:
 
 - **Number of sample emails:** the README says 8 (`El flujo 3 resuelve bien los 8 correos…`, near line 348). `data/correos/` holds **9** files. Suggested: "los 9 correos".
 - **Email provider:** the README lists Gmail as an example (lines near 140 and 153). The team uses an Infomaniak mailbox (IMAP to read, SMTP to send). No change is required because the README says "Gmail o IMAP", but the project documents say Infomaniak.
+
+## 4. Event router, flow 00 (router task 4.2)
+
+Suggested text for the README (webhook, URLs, publishing and lost events):
+
+> **El router de eventos (flujo 00).** La app avisa de todo lo que pasa con un `POST` a `http://n8n:5678/webhook/tienda` (es el valor de `N8N_WEBHOOK_URL` en `.env`). Un solo flujo, `00 Event Router`, recibe ese aviso y lo reparte por el campo `evento`: `apartado.creado` va al flujo 01 y `abono.registrado` al flujo 02. Los eventos que aún no tienen flujo (`venta.registrada`, `apartado.vencido`) o con un nombre desconocido se aceptan y se ignoran, sin error. Si el aviso llega sin nombre de evento, el router falla a propósito y el flujo 08 avisa.
+>
+> **Dos direcciones, no las confundas.**
+>
+> | Dirección | Cuándo funciona |
+> |---|---|
+> | `http://n8n:5678/webhook-test/tienda` (Test URL) | Solo mientras pulsas *Listen for test event* en el editor, y para un único aviso. Úsala para ver cómo es un aviso |
+> | `http://n8n:5678/webhook/tienda` (Production URL) | Cuando el router está **publicado**. Es la que usa la app de verdad |
+>
+> **Puesta en marcha.** Importa los flujos (`python scripts/import_new_workflows.py --run` o desde el editor), abre los nodos *Call …* del router y elige el flujo al que llaman (los identificadores cambian en cada n8n), pon *Settings → Error Workflow → `08 Error Workflow`* **en el router y en cada flujo que recibe eventos** (el aviso de un flujo llamado solo llega si ese flujo tiene su propio *Error Workflow*), y publica primero los flujos 01 y 02 y después el router.
+>
+> **Si n8n está parado o el router no está publicado, el aviso se pierde:** la app envía cada evento una sola vez, sin reintentos. Antes de una demo: `docker compose up -d` y el router publicado. Los flujos programados (cierre diario, recordatorios) no dependen de estos avisos, porque consultan la API.
+
+Checked: the routing, import and Error Workflow steps were run in a clean throwaway n8n and in the team's n8n (see `workflows/tests/00-event-router.md`). A literal `docker compose up -d` from an empty volume was not repeated for this task.
