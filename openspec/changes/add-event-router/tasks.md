@@ -2,13 +2,13 @@
 
 ## 1. Build the router
 
-- [ ] 1.1 Create `00 Event Router` with a POST Webhook on path `tienda`, responding immediately, and verify with `curl` against the Test URL that the call is answered and the body appears under `body`.
-- [ ] 1.2 Add a Switch on `{{ $json.body.evento }}` with outputs for `apartado.creado`, `abono.registrado`, a fallback that ends successfully, and a "missing event name" branch that throws; verify each output is reached with a sample payload.
-- [ ] 1.3 Connect the two outputs to Execute Workflow nodes (not waiting for the result) that call flows 01 and 02 and pass `body.datos` plus the event name; verify with stub sub-workflows that each receives the exact payload.
+- [x] 1.1 Create `00 Event Router` with a POST Webhook on path `tienda`, responding immediately, and verify with `curl` against the Test URL that the call is answered and the body appears under `body`.
+- [x] 1.2 Add a Switch on `{{ $json.body.evento }}` with outputs for `apartado.creado`, `abono.registrado`, a fallback that ends successfully, and a "missing event name" branch that throws; verify each output is reached with a sample payload.
+- [x] 1.3 Connect the two outputs to Execute Workflow nodes (not waiting for the result) that call flows 01 and 02 and pass `body.datos` plus the event name; verify with stub sub-workflows that each receives the exact payload.
 
 ## 2. Tests with real events
 
-- [ ] 2.1 Save sample payloads for the four app events (copied from `docs/guia-de-la-app.md`) in `workflows/tests/00-event-router.md` with the expected route for each, and verify the file lists all four plus a malformed one.
+- [x] 2.1 Save sample payloads for the four app events (copied from `docs/guia-de-la-app.md`) in `workflows/tests/00-event-router.md` with the expected route for each, and verify the file lists all four plus a malformed one.
 - [ ] 2.2 Publish the router and create a reservation and a deposit from the app UI; verify in n8n's Executions that both events were routed to the right output.
 - [ ] 2.3 Post `venta.registrada`, an unknown event, and a body without `evento`; verify the first two end successfully with no alert and the third triggers the error workflow.
 
