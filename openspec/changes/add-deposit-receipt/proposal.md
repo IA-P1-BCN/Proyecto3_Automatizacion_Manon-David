@@ -24,7 +24,7 @@ None.
 ## Impact
 
 - **New file:** `workflows/02-deposit-receipt.json`, without credentials.
-- **Uses:** the shared Gmail credential, the event router, and `TIENDA_EMAIL_AVISOS`.
+- **Uses:** the shared SMTP credential, the event router, and `TIENDA_EMAIL_AVISOS`.
 - **Event source:** `abono.registrado` is sent by the app for deposits made from its screen and from the API alike. The initial deposit of a new reservation does **not** produce this event (it is part of `apartado.creado`, flow 01).
 - Flow 08 must be set as this flow's *Error Workflow*. Customer-facing text is Spanish.
 - No change to `backend/` or `frontend/`.

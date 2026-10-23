@@ -2,7 +2,7 @@
 
 ## Context
 
-Bank notices arrive in the shop Gmail inbox in two layouts (Bizum: `Importe:`, `Ordenante:`, `Concepto:`; transfer: dotted `Ordenante ........`). Decimals use a comma and amounts end in `EUR`. The app has no customer table; reservation names are short ("Carmen Ruiz") while payers appear with full names. The app validates every deposit and answers 422 with a readable `detail`. It announces each registered deposit with `abono.registrado`, which feeds flow 02. See proposal.md and `specs/remote-deposit-registration/spec.md`.
+Bank notices arrive in the shop Infomaniak inbox in two layouts (Bizum: `Importe:`, `Ordenante:`, `Concepto:`; transfer: dotted `Ordenante ........`). Decimals use a comma and amounts end in `EUR`. The app has no customer table; reservation names are short ("Carmen Ruiz") while payers appear with full names. The app validates every deposit and answers 422 with a readable `detail`. It announces each registered deposit with `abono.registrado`, which feeds flow 02. See proposal.md and `specs/remote-deposit-registration/spec.md`.
 
 ## Goals / Non-Goals
 
@@ -12,7 +12,7 @@ Bank notices arrive in the shop Gmail inbox in two layouts (Bizum: `Importe:`, `
 
 ## Decisions
 
-1. **Pipeline:** Gmail Trigger (poll) → mark as processed → AI extraction → validation Code node → fetch active reservations → matching Code node → branch (register / ask Marisa) → on 422, ask Marisa. *Alternative:* IMAP trigger; rejected because Gmail OAuth is already needed to send.
+1. **Pipeline:** Email Trigger (IMAP) → mark as processed → AI extraction → validation Code node → fetch active reservations → matching Code node → branch (register / ask Marisa) → on 422, ask Marisa. *Alternative:* none needed; the IMAP trigger fits the team's Infomaniak mailbox, which also sends through SMTP.
 
 2. **Mark-as-processed first.** The email is labelled or marked read before any registration. If something fails afterwards, the error workflow alerts and the team registers by hand; a lost registration is loud, a duplicated deposit would be silent. *Alternative:* mark after registering; rejected because a failure between the two steps reprocesses the email and double-registers.
 

@@ -12,7 +12,7 @@
 
 ## Notification channel
 
-**Decision:** email (Gmail) for all notices, to customers and to Marisa. Telegram is left for later (Advanced level).
+**Decision:** email (the team's Infomaniak mailbox) for all notices, to customers and to Marisa. Telegram is left for later (Advanced level).
 
 **Why:** the app already stores the customer's `email`; one credential; easiest to test with the emails in `data/correos/`. Marisa answers a doubtful case by email.
 
@@ -91,12 +91,17 @@
 **Rejected:** our own spec template under `specs/` (the first approach; replaced by OpenSpec's artifacts).
 
 ## n8n email account
+2026-10-23 (updated: Gmail replaced by an Infomaniak mailbox; confirmed with David)
 
-**Decision:** a single Gmail account (OAuth2 credential in n8n) both reads the bank notices and sends all messages. A dedicated team account, not a personal one.
+**Decision:** a single dedicated team mailbox on **Infomaniak** both reads the bank notices (IMAP, `mail.infomaniak.com:993`, SSL/TLS) and sends all messages (SMTP, port 587 STARTTLS or 465 SSL/TLS). Two n8n credentials (IMAP and SMTP) use a mailbox password generated in Infomaniak for the device; never the account password, and never in Git. Not a personal account.
 
-**Why:** one credential, simplest to set up and document. The test emails from `data/correos/` are sent to that same inbox.
+**Why:** the team created this mailbox, it is free, and n8n's Send Email and Email Trigger (IMAP) nodes need no paid feature. The test emails from `data/correos/` are sent to that same inbox.
 
-**Rejected:** two accounts (more credentials with no clear gain at Essential); reading over IMAP (needs an app password and another credential type).
+**Rejected:** Gmail OAuth2 (the team does not use it any more); two mailboxes (more credentials with no clear gain at Essential).
+
+**Consequence:** flow 03 reads with the Email Trigger (IMAP) node and the others send with Send Email (SMTP); the sender address comes from `TIENDA_EMAIL_FROM`. Google Sheets (flow 05) still needs its own Google credential.
+
+**Pitfall found:** a stray space before the user name or host in a credential gives misleading errors (`COMMAND FAILED`, `ENOTFOUND`). Re-type those fields.
 
 **Consequence:** flow 3 must filter the inbox (e.g. by the bank's sender/subject) so it doesn't process its own sent mail or customer replies.
 
@@ -119,7 +124,7 @@
 
 **Rejected:** n8n data table (Marisa can't see it and it's lost if n8n data is wiped); local CSV (invisible to Marisa, awkward in Docker).
 
-**Consequence:** needs a Google Sheets credential (can be the same account as Gmail) and the sheet ID as a variable, not in the JSON.
+**Consequence:** needs a Google Sheets credential (a Google account; the mailbox is on Infomaniak) and the sheet ID as an environment variable, not in the JSON (n8n Variables are paid, see [decision](#alert-address-and-local-port-without-paid-n8n-features)).
 
 ## Daily close time and day
 
@@ -186,8 +191,21 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 | #4 HU-04 · Cierre de caja automático | 05 · `add-daily-close` | David | `feat/4-daily-close` |
 | #20 Flujo de prueba | demo-data flow | Manon | `feat/20-demo-data-flow` |
 | #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
-| *(none yet)* | `add-event-router` (routes events to 01 and 02) | Manon | **create an issue first**, then `feat/<issue#>-event-router` |
+| #32 Event router (single webhook, routes app events to flows 01 and 02) | `add-event-router` | Manon | `feat/32-event-router` |
 
 **Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
 
-**Open:** the router has no issue; create one (or attach it to #1/#2) before starting it.
+**Update:** the router issue was created as #32.
+
+## Alert address and local port without paid n8n features
+2026-10-23
+
+**Decision:**
+- n8n *Variables* (`$vars`) need a paid plan (Cloud Pro or self-hosted Business), and we pay for nothing in n8n. `TIENDA_EMAIL_AVISOS` is a plain environment variable: `.env` (git-ignored) → `docker-compose.yml` → n8n container, read as `$env.TIENDA_EMAIL_AVISOS`. n8n v2 blocks that access by default, so the n8n service sets `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. This applies to every flow that needs the shop address.
+- The host port of the app is `${TIENDA_PORT:-8000}`. A teammate whose port 8000 is busy sets `TIENDA_PORT=8001` in their own `.env`. Containers talk over Docker's network, so n8n still calls `http://tienda:8000`; exported flows must never contain `localhost` or `8001`.
+
+**Why:** zero cost, no real address in Git, and no per-person edit of `docker-compose.yml`.
+
+**Rejected:** a local uncommitted edit of the port mapping (easy to commit by mistake); a hard-coded address in the flow JSON (real data in Git).
+
+**Consequence:** a plain environment variable is readable by every workflow of that instance, so it must hold no secret. The shop address is not one.

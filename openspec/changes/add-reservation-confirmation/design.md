@@ -16,7 +16,7 @@ The event router passes `datos` of `apartado.creado` unchanged: `id, fecha, clie
 
 2. **IF node on a validity check (non-empty, contains `@`)** splits the customer path from the shop path. The shop path ends successfully, so a missing email is not an error.
 
-3. **Formatting in one Code node** (comma decimals, `€`, `dd/mm/yyyy`, optional size line, paid-in-full variant) so the Gmail node only inserts ready-made text. Formatting only, no arithmetic on the amounts.
+3. **Formatting in one Code node** (comma decimals, `€`, `dd/mm/yyyy`, optional size line, paid-in-full variant) so the Send Email node only inserts ready-made text. Formatting only, no arithmetic on the amounts.
 
 4. **Plain text email.** Simplest to review and to test; an HTML template can come later.
 
