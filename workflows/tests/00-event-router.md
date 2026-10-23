@@ -64,6 +64,35 @@ Invoke-RestMethod -Method Post -Uri $url -ContentType 'text/plain' -Body 'esto n
 
 Every command prints `message: Workflow was started`, even for 6 and 7: the router answers first and fails afterwards. Check the outcome in n8n's Executions list.
 
+## Failing handler (tasks 3.1 and 3.2)
+
+`workflows/tests/00-stub-failing.json` is a test-only handler that always throws. Import it and publish it, then in the router point **Call Deposit Receipt (flow 02)** to it (put the normal stub back afterwards).
+
+```powershell
+$url = 'http://localhost:5678/webhook/tienda'
+
+# A · deposit event: the handler fails
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "abono.registrado", "datos": {"cliente": "PRUEBA-ABONO"}}'
+
+# B · right after, a reservation event: must still be routed to the flow 01 stub
+Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "apartado.creado", "datos": {"cliente": "PRUEBA-CREADO"}}'
+```
+
+Expected (3.1): the router run for A is **success** (it does not wait for the handler), the failing handler's own run is **error**, and B ends with the flow 01 stub run **success**.
+
+For 3.2, repeat A in two settings and note whether an alert email arrives:
+
+| Step | Error Workflow set on | Alert for the failing handler? |
+|---|---|---|
+| 1 | router only | **No**: no email arrived |
+| 2 | router and the failing handler | **Yes**: an alert arrived |
+
+**Finding (3.2, reported by Manon, 2026-10-23):** the handler's run is a separate execution, so only the handler's own Error Workflow setting fires; the router's setting does not cover it, because the router run itself ends successfully. Every handler (flows 01, 02 and any later sub-workflow) must have flow 08 set in its own settings, besides the router.
+
+Result of 3.1 in the throwaway container (2026-10-23): A gave router success and handler error; B reached the flow 01 stub with success.
+
+Result of 3.1 on the team's n8n (reported by Manon, 2026-10-23): same behaviour, router success, failing handler error, and the next event still routed. Task 3.2 is answered by the table above.
+
 ## Setup after importing
 
 1. Import `workflows/tests/00-stub-reservation-confirmation.json` and `workflows/tests/00-stub-deposit-receipt.json` (placeholders until flows 01 and 02 exist), then `workflows/00-event-router.json`.

@@ -154,3 +154,28 @@ const stub = (name, nodeBase) => ({
 
 write('workflows/tests/00-stub-reservation-confirmation.json', stub('00 Stub · Reservation Confirmation (flow 01)', 20));
 write('workflows/tests/00-stub-deposit-receipt.json', stub('00 Stub · Deposit Receipt (flow 02)', 30));
+
+// Test-only handler that always fails (router tasks 3.1 and 3.2).
+write('workflows/tests/00-stub-failing.json', {
+  name: '00 Stub · Failing Handler (test only)',
+  nodes: [
+    {
+      id: id(50),
+      name: 'When Called By Router',
+      type: 'n8n-nodes-base.executeWorkflowTrigger',
+      typeVersion: 1.1,
+      position: [0, 0],
+      parameters: { inputSource: 'passthrough' },
+    },
+    {
+      id: id(51),
+      name: 'Fail On Purpose',
+      type: 'n8n-nodes-base.code',
+      typeVersion: 2,
+      position: [220, 0],
+      parameters: { jsCode: "throw new Error('Fallo provocado en el manejador de prueba');" },
+    },
+  ],
+  connections: { 'When Called By Router': { main: [[{ node: 'Fail On Purpose', type: 'main', index: 0 }]] } },
+  settings: { executionOrder: 'v1' },
+});

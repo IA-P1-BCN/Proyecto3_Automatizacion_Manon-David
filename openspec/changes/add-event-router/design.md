@@ -30,5 +30,5 @@ The app posts `{evento, datos}` to `http://n8n:5678/webhook/tienda` once per eve
 ## Risks / Trade-offs
 
 - **[Lost events]** The app never retries; an unpublished router or stopped n8n silently loses a message. → Documented in the README; publishing the router and `docker compose up -d` are part of the demo checklist. Scheduled flows don't rely on events.
-- **[Error workflow on sub-workflows]** It is not certain which workflow's *Error Workflow* setting fires when a sub-workflow fails. → Task 3.2 tests it on the real n8n image and sets the error workflow on both the router and each handler if needed.
+- **[Error workflow on sub-workflows]** Verified (task 3.2): when a handler fails, only the handler's own *Error Workflow* setting fires; the router's does not, because the router run ends successfully. → Flow 08 is set on the router and on every handler; flows 01 and 02 do it in their own tasks (2.1).
 - **[Test vs Production URL confusion]** → README states which URL is used when.

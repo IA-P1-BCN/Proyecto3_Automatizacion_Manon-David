@@ -132,6 +132,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** 12 unit tests pass; both JSON files parse and import in a throwaway n8n container; `$env` access verified in a Code node and an expression there. In the user's n8n the five error scenarios were reported as passing; see `docs/evidence/08-error-workflow/README.md`. Scenario 6 was dropped by the team; timing and screenshots are still pending.
 - **Remaining work at handoff:** record timing and screenshots (scenario 6 was dropped by the team); PR into `dev`. Update: David confirmed the switch to the Infomaniak mailbox and the Gmail wording was replaced in `AGENTS.md`, the specs, the decisions and the OpenSpec changes.
 
+### AI-008 — Event router and failing-handler tests (#32)
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** [#32 — Event router (single webhook, routes app events to flows 01 and 02)](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/32), [PR #33](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/pull/33).
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "start on the event router issue #32 / explain this issue better"; "always make tasks visible in the kanban issues"; "when suggesting payloads, always give me the cmd to put in powershell"; "generate the failing stub".
+- **Accepted suggestions and reasons:** Router plus sub-workflow handlers so each teammate owns separate files; webhook answers immediately and handlers are not awaited; unhandled events end successfully while a missing event name throws. Task checklists mirrored into every issue with `scripts/sync_issue_tasks.py`.
+- **Rejected / deferred suggestions and reasons:** Strict input schema on the stub triggers deferred, so a new app field would not be rejected.
+- **Agent errors and corrections:** "Stub" was used without explanation and was read as the Spanish "vale"; it was then explained as a placeholder handler. A shell `sed` edit corrupted the flow 08 generator and was redone with a proper edit. The flow 08 generator embedded CRLF on Windows checkouts and was fixed to normalise line endings.
+- **Verification and evidence:** Clean n8n container: seven payloads routed as expected and a failing handler did not block the next event. Team n8n (reported): payloads, real app events, malformed-event alerts, failing handler. Finding: only a handler's own Error Workflow setting fires for its failure (alert absent with router-only, present once set on the handler). Details in `workflows/tests/00-event-router.md`.
+- **Remaining work at handoff:** export and docs tasks (4.1 to 4.3) and review of PR #33.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.

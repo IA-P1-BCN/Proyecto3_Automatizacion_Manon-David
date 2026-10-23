@@ -14,8 +14,8 @@
 
 ## 3. Failure behaviour
 
-- [ ] 3.1 Make a stub handler fail and then send another event; verify the second event is still routed.
-- [ ] 3.2 Verify which workflow's *Error Workflow* setting fires when a called sub-workflow fails, and set flow 08 on the right workflows; record the finding in `docs/ai-log.md`.
+- [x] 3.1 Make a stub handler fail and then send another event; verify the second event is still routed.
+- [x] 3.2 Verify which workflow's *Error Workflow* setting fires when a called sub-workflow fails, and set flow 08 on the right workflows; record the finding in `docs/ai-log.md`.
 
 ## 4. Export and docs
 
