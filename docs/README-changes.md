@@ -88,4 +88,4 @@ Suggested text:
 >
 > **Puesta en marcha.** Importa `workflows/01-reservation-confirmation.json`, elige tu credencial SMTP en los dos nodos *Send …*, pon *Settings → Error Workflow → `08 Error Workflow`*, publícalo, y en el router elige este flujo en el nodo *Call Reservation Confirmation (flow 01)*. Si n8n está parado cuando se crea el apartado, no hay confirmación: la app no reintenta.
 
-Checked: payloads and results in `workflows/tests/01-reservation-confirmation.md`. Screenshots of the received emails go in `docs/evidence/01-reservation-confirmation/` (pending, taken by Manon).
+Checked: payloads and results in `workflows/tests/01-reservation-confirmation.md`. Screenshots of the received emails: `docs/evidence/01-reservation-confirmation/`.

@@ -17,7 +17,7 @@
 ## 3. Export and docs
 
 - [x] 3.1 Export to `workflows/01-reservation-confirmation.json` and verify no credentials or real addresses are in it.
-- [ ] 3.2 Add the flow to the README credentials/variables list and save screenshots of the received emails in `docs/evidence/01-reservation-confirmation/`.
+- [x] 3.2 Add the flow to the README credentials/variables list and save screenshots of the received emails in `docs/evidence/01-reservation-confirmation/`.
 - [ ] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
 
 ## Workflow follow-up
