@@ -23,7 +23,7 @@ None.
 ## Impact
 
 - **New file:** `workflows/01-reservation-confirmation.json`, without credentials.
-- **Uses:** the shared Gmail credential; the event router (`add-event-router`); the alert address `TIENDA_EMAIL_AVISOS`.
+- **Uses:** the shared SMTP credential; the event router (`add-event-router`); the alert address `TIENDA_EMAIL_AVISOS`.
 - **Customer-facing text** is Spanish; flow and node names are English.
 - **No change** to `backend/` or `frontend/`. Flow 08 must be set as this flow's *Error Workflow*.
 - Consent: a customer who gave an email is assumed to accept notices about their own reservation (decision recorded).

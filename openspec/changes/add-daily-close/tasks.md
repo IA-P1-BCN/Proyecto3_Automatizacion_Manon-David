@@ -14,7 +14,7 @@
 
 ## 3. Outputs
 
-- [ ] 3.1 Add the Gmail node with the Spanish summary (date, per-method and overall totals, "no movements" variant, Bizum-includes-transfers note); verify the email for a busy day and an empty day.
+- [ ] 3.1 Add the Send Email node with the Spanish summary (date, per-method and overall totals, "no movements" variant, Bizum-includes-transfers note); verify the email for a busy day and an empty day.
 - [ ] 3.2 Add the Google Sheets *append or update* on `fecha`; verify one row per date and that running the same date twice leaves one row.
 - [ ] 3.3 Run both outputs in parallel and verify that a deliberately wrong sheet ID still sends the email and then fails the execution.
 
@@ -28,7 +28,7 @@
 ## 5. Export and docs
 
 - [ ] 5.1 Set flow 08 as the *Error Workflow*, export to `workflows/05-daily-close.json`, and verify no credentials, sheet ID or real address are in it.
-- [ ] 5.2 Add the credentials/variables (Gmail, X-API-Key, Google Sheets, sheet ID, `TIENDA_EMAIL_AVISOS`) to the README, plus the note about running the manual close and checking the history for gaps.
+- [ ] 5.2 Add the credentials/variables (SMTP/IMAP mailbox, X-API-Key, Google Sheets, sheet ID, `TIENDA_EMAIL_AVISOS`) to the README, plus the note about running the manual close and checking the history for gaps.
 - [ ] 5.3 Save screenshots of an email and of the sheet in `docs/evidence/05-daily-close/`, log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
 
 ## Workflow follow-up

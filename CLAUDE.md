@@ -35,6 +35,6 @@ Every Kanban issue shows its detailed tasks: the checklist from `openspec/change
 Specs are managed with OpenSpec (`openspec/`, schema `spec-driven`). Claude Code: `/opsx:propose`, `/opsx:apply`, `/opsx:archive`. OpenCode: `/opsx-propose`, `/opsx-apply`, `/opsx-archive`. Resolve every `[NEEDS CLARIFICATION]` with the team before implementing.
 
 ## Commands
-- Start the app and n8n: `docker compose up -d` (app: http://localhost:8000, Swagger: `/docs`, n8n: http://localhost:5678). Stop: `docker compose down`.
+- Start the app and n8n: `docker compose up -d` (app: http://localhost:8000, Swagger: `/docs`, n8n: http://localhost:5678). Stop: `docker compose down`. If port 8000 is busy, set `TIENDA_PORT=8001` in your own `.env`: only the browser URL changes (`http://localhost:8001`); inside n8n it stays `http://tienda:8000`.
 - Inside n8n, call the app at `http://tienda:8000`, not `localhost`.
 - Backend tests: `pytest` from `backend/`.

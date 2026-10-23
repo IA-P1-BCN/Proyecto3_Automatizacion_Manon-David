@@ -2,7 +2,7 @@ services:
   tienda:
     build: .
     ports:
-      - "8000:8000"
+      - "${TIENDA_PORT:-8000}:8000"
     environment:
       - TZ=Europe/Madrid
       - DB_PATH=/data/tienda.db
@@ -19,6 +19,9 @@ services:
     environment:
       - TZ=Europe/Madrid
       - GENERIC_TIMEZONE=Europe/Madrid
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - TIENDA_EMAIL_AVISOS=${TIENDA_EMAIL_AVISOS:-}
+      - TIENDA_EMAIL_FROM=${TIENDA_EMAIL_FROM:-}
     volumes:
       - n8n_data:/home/node/.n8n
 

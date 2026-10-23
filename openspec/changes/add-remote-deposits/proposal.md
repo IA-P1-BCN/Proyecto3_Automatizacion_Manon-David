@@ -6,7 +6,7 @@ More customers pay their deposits by Bizum or bank transfer. Marisa has to read 
 
 ## What Changes
 
-- Add an n8n workflow, `03 Remote Deposits`, that watches the shop's Gmail inbox for bank notices.
+- Add an n8n workflow, `03 Remote Deposits`, that watches the shop's Infomaniak inbox for bank notices.
 - Ignore emails that are not payments (such as bank advertising).
 - Use a free AI model **only to extract** payer, amount, concept and type from the email text. Validate its output.
 - Let the flow, not the AI, decide which reservation the payment belongs to (number in the concept, then payer-name matching) and call the app's API to register the deposit as `bizum`.
@@ -26,7 +26,7 @@ None.
 ## Impact
 
 - **New file:** `workflows/03-remote-deposits.json`, without credentials.
-- **Credentials/config:** the shared Gmail OAuth2 credential, the Groq credential (already configured in n8n), a Header Auth credential `X-API-Key` for the app, `TIENDA_EMAIL_AVISOS`, and the bank sender filter.
+- **Credentials/config:** the shared SMTP and IMAP credentials, the Groq credential (already configured in n8n), a Header Auth credential `X-API-Key` for the app, `TIENDA_EMAIL_AVISOS`, and the bank sender filter.
 - **App API used:** `GET /api/apartados?estado=activo`, `POST /api/apartados/{id}/abonos`. The app enforces the rules (positive amount, not above pending, active and within deadline) and answers 422 with a readable message.
 - **Data sent to the AI model:** only the email text. No customer list, phones or emails.
 - **Test data:** the nine sample emails in `data/correos/` (the README says eight; the folder holds nine files, one of them advertising).

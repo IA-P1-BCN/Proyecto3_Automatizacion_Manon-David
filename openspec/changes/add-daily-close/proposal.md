@@ -25,7 +25,7 @@ None.
 ## Impact
 
 - **New file:** `workflows/05-daily-close.json`, without credentials.
-- **Credentials/config:** the shared Gmail credential, a Header Auth credential `X-API-Key`, a Google Sheets credential, the sheet ID (configuration, not in the JSON), and `TIENDA_EMAIL_AVISOS` for the recipient.
+- **Credentials/config:** the shared SMTP credential, a Header Auth credential `X-API-Key`, a Google Sheets credential, the sheet ID (configuration, not in the JSON), and `TIENDA_EMAIL_AVISOS` for the recipient.
 - **App API used:** `GET /api/ventas?desde&hasta` and `GET /api/abonos?desde&hasta`, with dates `YYYY-MM-DD`, both bounds inclusive.
 - **Boundary:** anything registered after 23:55 falls in the next day's close (decided).
 - Depends on flow 08 (error workflow). Unlike event flows, it does not depend on webhooks: it reads the API, so a missed event never affects it.
