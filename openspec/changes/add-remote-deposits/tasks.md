@@ -3,7 +3,7 @@
 ## 1. Inputs and credentials
 
 - [ ] 1.1 Configure the Gmail Trigger (poll about every minute, bank-sender filter from configuration) and verify it fires for a sample email sent to the inbox and not for the flow's own sent mail.
-- [ ] 1.2 Create the OpenRouter credential, pick a free model, and verify it answers a test prompt; note the model in `docs/ai-log.md`.
+- [ ] 1.2 Confirm the existing Groq credential works, pick a Groq model, and verify it answers a test prompt; note the model in `docs/ai-log.md`.
 - [ ] 1.3 Create the Header Auth credential `X-API-Key` for the app and verify `GET http://tienda:8000/api/apartados?estado=activo` returns the list from inside n8n.
 
 ## 2. Extraction and validation
@@ -28,7 +28,7 @@
 ## 5. Export and docs
 
 - [ ] 5.1 Wire flow 08 as the *Error Workflow*, export to `workflows/03-remote-deposits.json` and verify no credentials or real addresses are in it.
-- [ ] 5.2 Add the credentials/variables (Gmail, OpenRouter, X-API-Key, `TIENDA_EMAIL_AVISOS`, bank-sender filter) to the README, and document what data is sent to the AI model.
+- [ ] 5.2 Add the credentials/variables (Gmail, Groq, X-API-Key, `TIENDA_EMAIL_AVISOS`, bank-sender filter) to the README, and document what data is sent to the AI model.
 - [ ] 5.3 Log prompts, model comparison and agent errors in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
 
 ## Workflow follow-up

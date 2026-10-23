@@ -26,10 +26,11 @@ None.
 ## Impact
 
 - **New file:** `workflows/03-remote-deposits.json`, without credentials.
-- **Credentials/config:** the shared Gmail OAuth2 credential, an OpenRouter credential (free model), a Header Auth credential `X-API-Key` for the app, `TIENDA_EMAIL_AVISOS`, and the bank sender filter.
+- **Credentials/config:** the shared Gmail OAuth2 credential, the Groq credential (already configured in n8n), a Header Auth credential `X-API-Key` for the app, `TIENDA_EMAIL_AVISOS`, and the bank sender filter.
 - **App API used:** `GET /api/apartados?estado=activo`, `POST /api/apartados/{id}/abonos`. The app enforces the rules (positive amount, not above pending, active and within deadline) and answers 422 with a readable message.
 - **Data sent to the AI model:** only the email text. No customer list, phones or emails.
 - **Test data:** the nine sample emails in `data/correos/` (the README says eight; the folder holds nine files, one of them advertising).
 - **Refines a recorded decision:** the payer-name matching rule (see `docs/decisions-clarify.md`, "Payer-name matching refinement").
 - Depends on flow 02 (receipt) and flow 08 (error workflow).
 - **Owner:** David (@davidlafuentem) ([decision](../../../docs/decisions-clarify.md#flow-split-between-manon-and-david)).
+- **Issue · branch:** #3 · `feat/3-remote-deposits` (PR targets `dev`).

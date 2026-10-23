@@ -54,7 +54,7 @@
 
 ## Agent tooling: Claude Code and OpenCode
 
-**Decision:** the two teammates use different agents: Manon uses **Claude Code**, David uses **OpenCode with a paid GPT model** (stated as "GPT 6.1"; confirm the exact model name for the AI log). Everything we create must work with **both**. The same scope rules apply to both: each agent edits only the owner's spec and flow files on the owner's `flow-<name>` branch; never the partner's files, `main`, `backend/` or `frontend/`.
+**Decision:** the two teammates use different agents: Manon uses **Claude Code**, David uses **OpenCode with a paid GPT model** (stated as "GPT 6.1"; confirm the exact model name for the AI log). Everything we create must work with **both**. The same scope rules apply to both: each agent edits only the owner's spec and flow files on the branch of the assigned issue (`feat/<issue#>-…`); never the partner's files, `main`, `backend/` or `frontend/`.
 
 **How we keep it agent-neutral:**
 - David owns `AGENTS.md` (deliverable #17). Claude-specific needs are documented in the project's **`CLAUDE.md`**; `AGENTS.md` can point to it if needed. We don't duplicate the rules.
@@ -74,6 +74,7 @@
 **Rejected:** all Spanish (the first drafts); all English including customer messages (customers wouldn't understand).
 
 ## Commit language
+2026-10-23 (confirmed for commits **and PR titles/descriptions**)
 
 **Decision:** Conventional Commits, message in **English** (`feat: add apartado confirmation flow`). Types: feat, fix, refactor, docs, chore, test.
 
@@ -100,14 +101,15 @@
 **Consequence:** flow 3 must filter the inbox (e.g. by the bank's sender/subject) so it doesn't process its own sent mail or customer replies.
 
 ## AI model inside n8n (flow 3)
+2026-10-23 (supersedes the earlier OpenRouter choice; aligns with `AGENTS.md`)
 
-**Decision:** a free (`:free`) OpenRouter model that only extracts `ordenante`, `importe`, `concepto` and `tipo` from the email text. The specific model is chosen by testing the 8 emails and noted in `docs/ai-log.md`.
+**Decision:** a model served by **Groq** that only extracts `ordenante`, `importe`, `concepto` and `tipo` from the email text. The Groq API key is already provided to n8n as a credential (never in Git). The specific model is chosen by testing the 9 emails and noted in `docs/ai-log.md`.
 
-**Why:** no cost, aligned with the README, and it receives only the text of the bank notice (data minimisation). The flow makes the decisions, so a less accurate model can't register a payment wrongly.
+**Why:** Groq's free tier costs nothing, is fast, is named in the README as an option, and the key is already configured. The model receives only the text of the bank notice (data minimisation). The flow makes the decisions, so a less accurate model can't register a payment wrongly.
 
-**Rejected:** Gemini free tier (usage limits can break runs); paid Claude API (cost per email and another key to manage).
+**Rejected:** OpenRouter `:free` models (a second provider and key with no gain now that Groq is set up); Gemini free tier (usage limits can break runs); paid Claude API (cost per email and another key to manage).
 
-**Risk:** free models can be slow or fail. The flow must validate the output (required fields, numeric amount) and, if invalid, ask Marisa instead of registering.
+**Risk:** free tiers have rate limits and can fail. The flow must validate the output (required fields, numeric amount) and, if invalid, ask Marisa instead of registering.
 
 ## Daily close history
 
@@ -164,3 +166,28 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 **Rejected:** exact full-name equality (fails the sample data); fuzzy/similarity matching (risk of assigning to someone else).
 
 **To confirm:** that the abbreviated-payer rule (3) is acceptable, and verify it against the seeded names when the flow is built.
+
+## Branching model and issues per flow
+2026-10-23 (supersedes the `flow-<name>` / `docs-<topic>` branch names and the "PR to `main`" rule; aligns with `AGENTS.md`)
+
+**Decision:**
+- Branches are created from `dev` and named `feat/<issue#>-<short-description>`, `docs/<issue#>-<short-description>` or `fix/<issue#>-<short-description>`. One issue = one branch = one PR.
+- PRs target **`dev`**, reference the issue and carry a standalone `Closes #N` line (`Refs #N` if partial). `dev` → `main` goes through a reviewed PR. Nobody pushes to `dev` or `main`.
+- PR titles, PR descriptions and commits are in **English**.
+
+**Issues per flow** (GitHub issues keep their original Spanish titles):
+
+| Issue | Flow / OpenSpec change | Owner | Branch |
+|---|---|---|---|
+| #5 HU-05 · Avisos de errores | 08 · `add-error-workflow` | Manon | `feat/5-error-workflow` |
+| #1 HU-01 · Confirmación al apartar | 01 · `add-reservation-confirmation` | Manon | `feat/1-reservation-confirmation` |
+| #2 HU-02 · Recibo de cada abono | 02 · `add-deposit-receipt` | Manon | `feat/2-deposit-receipt` |
+| #3 HU-03 · Abonos por Bizum o transferencia… | 03 · `add-remote-deposits` | David | `feat/3-remote-deposits` |
+| #4 HU-04 · Cierre de caja automático | 05 · `add-daily-close` | David | `feat/4-daily-close` |
+| #20 Flujo de prueba | demo-data flow | Manon | `feat/20-demo-data-flow` |
+| #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
+| *(none yet)* | `add-event-router` (routes events to 01 and 02) | Manon | **create an issue first**, then `feat/<issue#>-event-router` |
+
+**Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
+
+**Open:** the router has no issue; create one (or attach it to #1/#2) before starting it.

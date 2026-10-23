@@ -15,7 +15,7 @@ The application owns business records, validation, balances, state transitions, 
 - Use the `Europe/Madrid` timezone for business schedules and reporting boundaries. Preserve API date formats in requests.
 - Preserve existing API fields, endpoint paths, and event names in Spanish. Do not translate integration contracts.
 - Do not rewrite the supplied Spanish assignment or app guide just to enforce the documentation language rule.
-- Commit-message and PR language has not been explicitly agreed; confirm it when requesting permission for those operations.
+- Commit messages, PR titles and PR descriptions are in English (Conventional Commits, e.g. `feat: add apartado confirmation flow`).
 
 ## Autonomy and permission boundaries
 
@@ -56,6 +56,8 @@ initial main
 - The merged-PR automation closes referenced issues only after a PR is merged into `dev`; approval alone does not complete an issue. Closed, unmerged PRs must leave issues open. Never bypass human review or merge autonomously.
 - The team board is [IA-P1-BCN Project #43](https://github.com/orgs/IA-P1-BCN/projects/43). Its native `Item closed` workflow must set `Status` to `Done`. After integration, verify both issue closure and board status; report failed automation instead of claiming completion. See `docs/issue-completion-automation.md` for setup, permissions, and bootstrap limitations.
 - Deliveries go from `dev` to `main` through a reviewed PR.
+- Which issue belongs to which flow, owner and branch: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`. The event router has no issue yet; ask the user before starting it.
+- Claude Code users also have `CLAUDE.md`; shared conventions are in `docs/constitution.md`. If the two ever disagree, fix both in the same PR.
 - Before an authorized commit, inspect status, diff, and recent commit style. Stage only intended files and check for secrets and personal data.
 - Before requesting approval, summarize the changes, verification results, and any blockers. Request permission for the specific pending Git operations.
 
@@ -99,7 +101,7 @@ Layaway states are `activo`, `liquidado`, and `vencido`. The application automat
 
 Read `abonado`, `pendiente`, `fecha_limite`, and the resulting state from the application. Do not recompute a layaway balance in n8n or ask a language model to calculate it. n8n may aggregate API amounts for daily/monthly reports using appropriate monetary precision.
 
-The API supports `efectivo`, `tarjeta`, and `bizum` as payment methods. Bank transfers appear in the assignment's email examples, but there is no documented `transferencia` method: resolve and document the mapping before implementing that case; do not silently invent a value or change the app.
+The API supports `efectivo`, `tarjeta`, and `bizum` as payment methods. Bank transfers appear in the assignment's email examples, but there is no documented `transferencia` method: the team decided to register transfers as `bizum` and keep the real type in the flow's notice/log (`docs/decisions-clarify.md#bank-transfers`). Do not invent another value or change the app.
 
 ## Workflow architecture
 

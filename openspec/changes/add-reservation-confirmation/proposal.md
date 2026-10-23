@@ -28,3 +28,4 @@ None.
 - **No change** to `backend/` or `frontend/`. Flow 08 must be set as this flow's *Error Workflow*.
 - Consent: a customer who gave an email is assumed to accept notices about their own reservation (decision recorded).
 - **Owner:** Manon (@ManonChab) ([decision](../../../docs/decisions-clarify.md#flow-split-between-manon-and-david)).
+- **Issue · branch:** #1 · `feat/1-reservation-confirmation` (PR targets `dev`).

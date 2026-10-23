@@ -30,3 +30,4 @@ None. There are no existing specs.
 - **Customer-facing text** is Spanish (the alert goes to Marisa); everything else is English, per the project language policy.
 - Source material: `specs/08-error-workflow.md` and the decisions in `docs/decisions-clarify.md`.
 - **Owner:** Manon (@ManonChab) ([decision](../../../docs/decisions-clarify.md#flow-split-between-manon-and-david)).
+- **Issue · branch:** #5 · `feat/5-error-workflow` (PR targets `dev`).
