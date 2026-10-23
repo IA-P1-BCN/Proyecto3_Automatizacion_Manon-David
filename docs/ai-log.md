@@ -144,6 +144,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** Clean n8n container: seven payloads routed as expected and a failing handler did not block the next event. Team n8n (reported): payloads, real app events, malformed-event alerts, failing handler. Finding: only a handler's own Error Workflow setting fires for its failure (alert absent with router-only, present once set on the handler). Details in `workflows/tests/00-event-router.md`.
 - **Remaining work at handoff:** export and docs tasks (4.1 to 4.3) and review of PR #33.
 
+### AI-009 — Flow 02 Deposit Receipt (#2)
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** [#2 — HU-02 · Recibo de cada abono](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/2); PR not opened yet.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "pick the next HU to my name, which is HU 2"; `/opsx:apply add-deposit-receipt`; "all tests done and successfull, you can go ahead and tick"; "3.1: I have exported it, use this one".
+- **Accepted suggestions and reasons:** The formatting and message texts live in a tested Code node source (`workflows/code/02-format-receipt.js`, 8 unit tests) so the flow never recalculates the app's figures. The exported flow is committed as the deliverable, stripped of credential references, the flow 08 ID, the instance ID and the flow ID. The sync script now reads issue #2's tasks from the working copy while the branch is open.
+- **Rejected / deferred suggestions and reasons:** Extracting a formatting sub-workflow shared with flow 01 deferred (design decision 2). Importing the flow into the team's n8n was done by Manon, not by the agent.
+- **Agent errors and corrections:** The agent first created the branch for HU-01 instead of HU-02 and deleted it (no commits lost). `scripts/sync_issue_tasks.py` read issue #2's tasks from `origin/dev`, so the first tick was not mirrored; fixed by reading the working copy. The agent's formatting printed "talla null" for a reservation without a size; the evidence screenshots exposed it and it was fixed with a unit test (test 9), so the committed Code node is newer than the one in the n8n tested by Manon until she pastes it. The generated JSON differs from the n8n export only in node IDs and positions, so `workflows/code/build-02-deposit-receipt.js` is a reference, not the source of the committed file.
+- **Verification and evidence:** Unit tests of the Code node pass. Manon reported on the team's n8n: receipts for a partial and a final deposit, the shop alert for an empty email and for an email without `@`, successful executions, deposits from the app screen and the API, two deposits in a row, and flow 08's alert after breaking the SMTP credential. Details in `workflows/tests/02-deposit-receipt.md`. Not run by the agent: any n8n execution.
+- **Remaining work at handoff:** screenshots in `docs/evidence/02-deposit-receipt/`, the README text from `docs/README-changes.md`, opening the PR to `dev` with `Closes #2`, and David's review.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
