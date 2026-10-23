@@ -29,4 +29,4 @@ None.
 - Flows 01 and 02 are built as callable sub-workflows (see their changes). Flow 08 must be set as the *Error Workflow* of the router.
 - Webhook authentication is not part of the Essential level (Advanced story HU-14).
 - **Owner:** Manon (@ManonChab) ([decision](../../../docs/decisions-clarify.md#flow-split-between-manon-and-david)).
-- **Issue · branch:** none yet (create one first) (PR targets `dev`).
+- **Issue · branch:** #32 · `feat/32-event-router` (PR targets `dev`).

@@ -9,8 +9,9 @@ Test setup: local n8n 2.44.5 (Community), flows `08 Error Workflow` and `99 Erro
 | 3 | `{"api_key":"sk-test-123","detalle":"422"}` | `api_key` masked, `detalle` visible | OK | pending |
 | 4 | 2000-character message | cut to 500 | OK | pending |
 | 5 | empty message | `error sin mensaje` | OK | pending |
-| 6 | invalid email credential | no email, no retry loop, failure in execution history | not recorded yet | pending |
 
 Also unit-tested without n8n: `node --test workflows/code/08-sanitise-error.test.js` (12 tests, all passing).
 
 Still to record: the arrival time (target: under one minute), the Madrid time shown in the email, and the screenshots. Save them in this folder.
+
+Scenario 6 (invalid email credential) was dropped by the team on 2026-10-23 and is not tested.

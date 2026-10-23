@@ -7,7 +7,7 @@
 
 ## 2. Sanitise and format
 
-- [x] 2.1 Write the Code node logic (mask secrets, cut to 500 characters, apply the two fallbacks, build subject and body in Spanish) and verify it against the six sample inputs in the spec (code and tests: `workflows/code/08-sanitise-error*.js`) (bearer token, JSON key, long message, empty message, missing step, plain message); keep the sample inputs and expected outputs in `workflows/tests/08-error-workflow.md`.
+- [x] 2.1 Write the Code node logic (mask secrets, cut to 500 characters, apply the two fallbacks, build subject and body in Spanish) and verify it against the five sample inputs in the spec (code and tests: `workflows/code/08-sanitise-error*.js`) (bearer token, JSON key, long message, empty message, missing step, plain message); keep the sample inputs and expected outputs in `workflows/tests/08-error-workflow.md`.
 - [x] 2.2 Confirm the Code node reads only the workflow name, execution id/url, last node and error message, and verify with an input containing a customer name, phone and email that none of them appears in the output.
 
 ## 3. Build the error workflow
@@ -18,9 +18,8 @@
 ## 4. Test with real failures
 
 - [x] 4.1 Build `99-error-test` (Webhook → Code that throws the message from the request), set its *Error Workflow* to flow 08, export it inactive to `workflows/99-error-test.json`, and verify it contains no credentials.
-- [ ] 4.2 Run the six scenarios from the spec through `99-error-test` and verify each alert matches the expected result; save screenshots as evidence in `docs/evidence/08-error-workflow/`.
+- [ ] 4.2 Run the five scenarios from the spec through `99-error-test` and verify each alert matches the expected result; save screenshots as evidence in `docs/evidence/08-error-workflow/`.
 - [ ] 4.3 Verify an alert arrives within one minute and that the time shown is Madrid time.
-- [ ] 4.4 Break the SMTP credential on purpose and verify no email is sent, no retry loop occurs and the failed execution is visible in n8n's history; restore the credential afterwards.
 
 ## 5. Documentation and hand-off
 

@@ -102,4 +102,4 @@ Resolved in the clarification phase ([decisions](../docs/decisions-clarify.md)):
 | Alert email fails (flow 08) | Accepted and documented; no backup channel |
 | Repeated alerts (flow 08) | One per failed execution, no limit |
 
-Flow split decided: Manon owns flows 08, router, 01, 02; David owns flows 03 and 05 ([decision](../docs/decisions-clarify.md#flow-split-between-manon-and-david)). Branches, PR target and issue per flow: [decision](../docs/decisions-clarify.md#branching-model-and-issues-per-flow). Open: the event router has no GitHub issue yet.
+Flow split decided: Manon owns flows 08, router, 01, 02; David owns flows 03 and 05 ([decision](../docs/decisions-clarify.md#flow-split-between-manon-and-david)). Branches, PR target and issue per flow: [decision](../docs/decisions-clarify.md#branching-model-and-issues-per-flow). The event router is issue #32.

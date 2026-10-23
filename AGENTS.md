@@ -56,7 +56,7 @@ initial main
 - The merged-PR automation closes referenced issues only after a PR is merged into `dev`; approval alone does not complete an issue. Closed, unmerged PRs must leave issues open. Never bypass human review or merge autonomously.
 - The team board is [IA-P1-BCN Project #43](https://github.com/orgs/IA-P1-BCN/projects/43). Its native `Item closed` workflow must set `Status` to `Done`. After integration, verify both issue closure and board status; report failed automation instead of claiming completion. See `docs/issue-completion-automation.md` for setup, permissions, and bootstrap limitations.
 - Deliveries go from `dev` to `main` through a reviewed PR.
-- Which issue belongs to which flow, owner and branch: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`. The event router has no issue yet; ask the user before starting it.
+- Which issue belongs to which flow, owner and branch: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`. The event router is issue #32 (`feat/32-event-router`, Manon).
 - Claude Code users also have `CLAUDE.md`; shared conventions are in `docs/constitution.md`. If the two ever disagree, fix both in the same PR.
 - Before an authorized commit, inspect status, diff, and recent commit style. Stage only intended files and check for secrets and personal data.
 - Before requesting approval, summarize the changes, verification results, and any blockers. Request permission for the specific pending Git operations.

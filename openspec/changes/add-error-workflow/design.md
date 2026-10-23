@@ -19,7 +19,7 @@ The Error Trigger only fires for failures of automatic executions (webhook, sche
 
 ## Decisions
 
-1. **Three nodes, in order: Error Trigger → Code (sanitise and format) → Send Email (SMTP).** A Code node is the right place for masking because regex rules are awkward to express in IF/Set nodes, and the same function can be unit-tested with the six inputs listed in the spec. *Alternative:* a Set node with expressions; rejected because chaining several regex replacements there is hard to read and review.
+1. **Three nodes, in order: Error Trigger → Code (sanitise and format) → Send Email (SMTP).** A Code node is the right place for masking because regex rules are awkward to express in IF/Set nodes, and the same function can be unit-tested with the five inputs listed in the spec. *Alternative:* a Set node with expressions; rejected because chaining several regex replacements there is hard to read and review.
 
 2. **Mask by pattern, not by known values only.** Rules: authorization/bearer/API-key headers; any `key=value` or `"key":"value"` whose key contains `key`, `token`, `secret`, `password` or `pass`; plus the literal value of `API_KEY` when readable. Then cut to 500 characters. *Alternative:* allow-listing safe text; rejected because error messages are free text and an allow-list would drop the useful part.
 

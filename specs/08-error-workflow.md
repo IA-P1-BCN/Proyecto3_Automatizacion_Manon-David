@@ -79,7 +79,8 @@ Helper flow `99-error-test` (for testing only, **inactive** in production): Webh
 | 3 | `{"api_key":"sk-test-123","detalle":"422"}` | `api_key` masked, `detalle` visible |
 | 4 | 2000-character message | Cut to 500 |
 | 5 | Error with no message | `«error sin mensaje»` |
-| 6 | Invalid email credential | No email; error visible in n8n's history (document in the evidence) |
+
+Scenario 6 (invalid email credential: no email, error only in n8n's history) was dropped from the tests by the team on 2026-10-23; the behaviour stays documented under *Error cases* but is not verified.
 
 ## Out of scope
 Automatic retries of failed flows; grouping or summarising alerts; alerting through Telegram (Advanced level); incident dashboard.

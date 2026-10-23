@@ -191,11 +191,11 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 | #4 HU-04 · Cierre de caja automático | 05 · `add-daily-close` | David | `feat/4-daily-close` |
 | #20 Flujo de prueba | demo-data flow | Manon | `feat/20-demo-data-flow` |
 | #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
-| *(none yet)* | `add-event-router` (routes events to 01 and 02) | Manon | **create an issue first**, then `feat/<issue#>-event-router` |
+| #32 Event router (single webhook, routes app events to flows 01 and 02) | `add-event-router` | Manon | `feat/32-event-router` |
 
 **Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
 
-**Open:** the router has no issue; create one (or attach it to #1/#2) before starting it.
+**Update:** the router issue was created as #32.
 
 ## Alert address and local port without paid n8n features
 2026-10-23
