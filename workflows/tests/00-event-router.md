@@ -93,6 +93,10 @@ Result of 3.1 in the throwaway container (2026-10-23): A gave router success and
 
 Result of 3.1 on the team's n8n (reported by Manon, 2026-10-23): same behaviour, router success, failing handler error, and the next event still routed. Task 3.2 is answered by the table above.
 
+## Export check (task 4.1)
+
+On 2026-10-23 the router was exported from the team's n8n with `n8n export:workflow` (read-only) and compared with `workflows/00-event-router.json`. Same 7 nodes, same connections and same parameters; the editor only changed node positions and added its own defaults (for example `workflowInputs` on the Execute Workflow nodes). The raw editor export is not committed because it carries instance-specific data: workflow and sub-workflow IDs, the `errorWorkflow` ID, version IDs and the owner's project name. No credentials appear in either file. The generated file stays the portable version.
+
 ## Setup after importing
 
 1. Import `workflows/tests/00-stub-reservation-confirmation.json` and `workflows/tests/00-stub-deposit-receipt.json` (placeholders until flows 01 and 02 exist), then `workflows/00-event-router.json`.
