@@ -31,3 +31,4 @@ None.
 - Depends on flow 08 (error workflow). Unlike event flows, it does not depend on webhooks: it reads the API, so a missed event never affects it.
 - Customer-facing (Marisa's) text is Spanish.
 - **Owner:** David (@davidlafuentem) ([decision](../../../docs/decisions-clarify.md#flow-split-between-manon-and-david)).
+- **Issue · branch:** #4 · `feat/4-daily-close` (PR targets `dev`).

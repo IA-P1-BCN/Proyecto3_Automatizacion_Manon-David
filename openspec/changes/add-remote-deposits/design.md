@@ -24,7 +24,7 @@ Bank notices arrive in the shop Gmail inbox in two layouts (Bizum: `Importe:`, `
 
 6. **Alerts to Marisa are one email template with a reason field**, in Spanish: payer, amount, concept, type (Bizum/transfer), reason and candidate reservations if any.
 
-7. **Model:** a free OpenRouter model chosen by testing the sample emails; the choice is logged in `docs/ai-log.md`.
+7. **Model:** a Groq model chosen by testing the sample emails; the choice is logged in `docs/ai-log.md`.
 
 8. **Bank-sender filter as configuration**, so the flow only looks at emails from the bank and not at its own sent mail or customer replies.
 

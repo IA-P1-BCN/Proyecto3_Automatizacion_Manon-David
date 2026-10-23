@@ -36,7 +36,7 @@ What Marisa does today with a notebook, a calculator and her memory should happe
 - **Tests are the contract.** Each flow has sample payloads and an expected result. If a test fails, fix the flow, not the test.
 - **One vocabulary:** use the names in the ontology (`Apartado`, `Abono`, `Vale`…). No invented synonyms.
 - **Traceability:** relevant prompts, agent errors/hallucinations and decisions go to `docs/ai-log.md` at the time, not afterwards.
-- **Two agents, one set of rules:** Manon uses **Claude Code**, David uses **OpenCode with a paid GPT model**. Everything we create must work with both ([decision](decisions-clarify.md#agent-tooling-claude-code-and-opencode)). Each agent edits only its owner's spec and flow files, on the owner's `flow-<name>` branch; never the partner's files, `main`, `backend/` or `frontend/`.
+- **Two agents, one set of rules:** Manon uses **Claude Code**, David uses **OpenCode with a paid GPT model**. Everything we create must work with both ([decision](decisions-clarify.md#agent-tooling-claude-code-and-opencode)). Each agent edits only its owner's spec and flow files, on the branch of the assigned issue (`feat/<issue#>-…`); never the partner's files, `main`, `backend/` or `frontend/`.
 
 ## 5. Conventions
 
@@ -45,7 +45,7 @@ What Marisa does today with a notebook, a calculator and her memory should happe
 | Language | Everything in **English**, except customer-facing messages (emails to customers and to Marisa), which are in **Spanish**. App field and event names stay as the app defines them ([decision](decisions-clarify.md#language-policy)). |
 | Flows | One flow = one JSON file in `workflows/`, named `NN-name-in-kebab.json` (e.g. `01-apartado-confirmation.json`). Descriptive node names, not `HTTP Request1`. |
 | Specs | Written with OpenSpec under `openspec/` ([decision](decisions-clarify.md#spec-tooling-openspec)). The flow number `NN` matches the workflow file. |
-| Git | One Kanban task = one branch = one PR with the exported JSON. Branches `flow-<name>` or `docs-<topic>`. Nobody pushes to `main` directly. |
+| Git | One issue = one branch = one PR with the exported JSON. Branches `feat/<issue#>-<desc>`, `docs/<issue#>-<desc>`, `fix/<issue#>-<desc>`, created from `dev`. PRs target `dev` (with `Closes #N`); `dev` → `main` through a reviewed PR. Nobody pushes to `dev` or `main` directly ([decision](decisions-clarify.md#branching-model-and-issues-per-flow)). |
 | Commits | Conventional Commits, message in **English**: `feat: add apartado confirmation flow` ([decision](decisions-clarify.md#commit-language)). |
 | Ownership | Each person owns their flows; the other reviews the PR. |
 | Board | [Project 43](https://github.com/orgs/IA-P1-BCN/projects/43): one card per story, status updated when the PR is opened/closed. |
@@ -56,7 +56,7 @@ A flow is done when:
 
 - [ ] It has a stable spec with no open `[NEEDS CLARIFICATION]`.
 - [ ] It meets every acceptance criterion of its story (HU-xx).
-- [ ] Tested with sample data, including error cases and the 8 emails in `data/correos/` where relevant.
+- [ ] Tested with sample data, including error cases and the 9 emails in `data/correos/` where relevant.
 - [ ] Error branch connected to the Error Workflow; running it twice duplicates nothing.
 - [ ] JSON exported in `workflows/`, **without credentials**.
 - [ ] Required credentials and variables listed (without values) in the README.

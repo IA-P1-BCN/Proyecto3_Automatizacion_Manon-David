@@ -53,7 +53,7 @@ Order: 08 first because every flow connects to it; 03 after 02 because a registe
 - **FR-23** A single clear reservation → the deposit is registered (Bizum and transfer as `bizum`) and the customer gets their receipt (FR-12).
 - **FR-24** Doubtful payment (several possible reservations, no concept, unknown customer) → nothing is registered and Marisa is asked.
 - **FR-25** Amount greater than what is pending, or reservation past its deadline → nothing is registered and Marisa is told the reason.
-- **FR-26** Correctly resolves the 8 emails in `data/correos/` (table in the README).
+- **FR-26** Correctly resolves the 9 emails in `data/correos/` (table in the README).
 
 **Flow 05 · Daily close**
 - **FR-27** Every night Marisa receives a summary with direct sales, deposits (initial ones included) and total, split by cash, card and Bizum (which includes transfers).
@@ -75,7 +75,7 @@ Order: 08 first because every flow connects to it; 03 after 02 because a registe
 ## 8. Essential success criteria
 - [ ] The app and n8n start with `docker compose` and events reach n8n.
 - [ ] A full reservation (creation → deposits → settlement) produces all the right messages, with amounts equal to the app's.
-- [ ] The 8 bank emails give the expected result.
+- [ ] The 9 bank emails give the expected result.
 - [ ] One night's close matches the app's sums.
 - [ ] Forcing a failure sends the alert, with no secrets.
 - [ ] Flows exported as JSON in `workflows/`, without credentials; the agent instructions and the AI log exist.
@@ -96,10 +96,10 @@ Resolved in the clarification phase ([decisions](../docs/decisions-clarify.md)):
 | Topic | Decision |
 |---|---|
 | Email account | A single Gmail account to read and send |
-| AI model in n8n (flow 03) | Free OpenRouter model, chosen by testing the 8 emails |
+| AI model in n8n (flow 03) | Groq model, chosen by testing the 9 emails |
 | Close history (FR-31) | Google Sheets, one row per date (upsert) |
 | Daily close (FR-27) | 23:55 Europe/Madrid, covers the current day |
 | Alert email fails (flow 08) | Accepted and documented; no backup channel |
 | Repeated alerts (flow 08) | One per failed execution, no limit |
 
-Flow split decided: Manon owns flows 08, router, 01, 02; David owns flows 03 and 05 ([decision](../docs/decisions-clarify.md#flow-split-between-manon-and-david)). Nothing else is open.
+Flow split decided: Manon owns flows 08, router, 01, 02; David owns flows 03 and 05 ([decision](../docs/decisions-clarify.md#flow-split-between-manon-and-david)). Branches, PR target and issue per flow: [decision](../docs/decisions-clarify.md#branching-model-and-issues-per-flow). Open: the event router has no GitHub issue yet.

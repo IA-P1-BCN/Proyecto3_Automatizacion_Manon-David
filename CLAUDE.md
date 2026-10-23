@@ -23,10 +23,10 @@ n8n automations for a shoe shop's layaway ("apartado") system. The FastAPI app i
 Everything is **English**; **customer-facing messages** (emails to customers and Marisa) are **Spanish**. App field and event names stay as the app defines them (`apartado`, `abono`, `fecha_limite`, `apartado.creado`).
 
 ## Scope per agent
-Each agent edits only its owner's spec and flow files, on the owner's `flow-<name>` branch. Never touch the partner's files, `main`, `backend/` or `frontend/`.
+Each agent edits only its owner's spec and flow files, on the branch of the assigned issue (`feat/<issue#>-<short-description>`, from `dev`). Never touch the partner's files, `main`, `backend/` or `frontend/`. Issue ↔ flow mapping: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`.
 
 ## Git
-Conventional Commits, message in English: `feat: add apartado confirmation flow`. One Kanban task = one branch = one PR with the exported flow JSON. Nobody pushes to `main`. Don't commit unless asked.
+Conventional Commits, message in English: `feat: add apartado confirmation flow`. One issue = one branch (`feat/<issue#>-…`, `docs/<issue#>-…`, `fix/<issue#>-…`, from `dev`) = one PR **targeting `dev`** with the exported flow JSON and a `Closes #N` line. `dev` → `main` goes through a reviewed PR. Nobody pushes to `dev` or `main`. Don't commit unless asked. Commit and PR text in English.
 
 ## Specs (OpenSpec)
 Specs are managed with OpenSpec (`openspec/`, schema `spec-driven`). Claude Code: `/opsx:propose`, `/opsx:apply`, `/opsx:archive`. OpenCode: `/opsx-propose`, `/opsx-apply`, `/opsx-archive`. Resolve every `[NEEDS CLARIFICATION]` with the team before implementing.
