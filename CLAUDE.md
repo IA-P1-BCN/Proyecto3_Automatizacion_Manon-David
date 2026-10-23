@@ -28,6 +28,9 @@ Each agent edits only its owner's spec and flow files, on the branch of the assi
 ## Git
 Conventional Commits, message in English: `feat: add apartado confirmation flow`. One issue = one branch (`feat/<issue#>-…`, `docs/<issue#>-…`, `fix/<issue#>-…`, from `dev`) = one PR **targeting `dev`** with the exported flow JSON and a `Closes #N` line. `dev` → `main` goes through a reviewed PR. Nobody pushes to `dev` or `main`. Don't commit unless asked. Commit and PR text in English.
 
+## Issues and tasks
+Every Kanban issue shows its detailed tasks: the checklist from `openspec/changes/<change>/tasks.md` is mirrored in the issue body under `## Implementation tasks`. When tasks change (ticked, added, removed), update the repo file and re-sync the issue: `python scripts/sync_issue_tasks.py <issue#>`. The repo file stays the source of truth.
+
 ## Specs (OpenSpec)
 Specs are managed with OpenSpec (`openspec/`, schema `spec-driven`). Claude Code: `/opsx:propose`, `/opsx:apply`, `/opsx:archive`. OpenCode: `/opsx-propose`, `/opsx-apply`, `/opsx-archive`. Resolve every `[NEEDS CLARIFICATION]` with the team before implementing.
 

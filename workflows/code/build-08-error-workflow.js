@@ -2,7 +2,8 @@
 // Run from the repo root: node workflows/code/build-08-error-workflow.js
 const fs = require('node:fs');
 
-const sanitiseCode = fs.readFileSync('workflows/code/08-sanitise-error.js', 'utf8');
+// Same output on LF and CRLF checkouts.
+const sanitiseCode = fs.readFileSync('workflows/code/08-sanitise-error.js', 'utf8').replaceAll('\r\n', '\n');
 
 const workflow = {
   name: '08 Error Workflow',
