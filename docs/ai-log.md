@@ -108,6 +108,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Permission update:** After reviewing the proposed organization, the user explicitly authorized the commit and push of `docs/18-ai-log`, then requested execution. This permission does not include PR creation or merging.
 - **Remaining work at handoff:** Execute the authorized commit and push, then request permission for a PR targeting `dev`. Integration of #17 and #18 is needed for the shared repository to contain both the agent instructions and the maintained log.
 
+### AI-006 — Post-PR review and convention alignment
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** none yet (documentation sync after PRs #24, #25, #26 and #28); branch `docs/sync-conventions`, from `dev` with `main` merged in.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "review project after PRs"; then decisions on PR target, branch names, Groq, nine emails and English PR/commit text; "fix the docs".
+- **Accepted suggestions and reasons:** One convention for both agents: PRs target `dev`, branches `feat|docs|fix/<issue#>-…`, Groq inside flows, nine test emails, English commits and PRs. Issue-to-flow mapping recorded in `docs/decisions-clarify.md`. Transfers registered as `bizum` copied into `AGENTS.md`, which still listed the mapping as unresolved.
+- **Rejected / deferred suggestions and reasons:** The assignment `README.md` was left unchanged (it still says eight emails and lists OpenRouter as an example), per the rule not to rewrite the supplied Spanish text. The event router has no GitHub issue yet; none was created.
+- **Agent errors and corrections:** A first review pass read `origin/main` only and missed that `dev` held the new automation; corrected by comparing both branches. The first edit script ignored CRLF line endings and was fixed before any file was left half-edited.
+- **Verification and evidence:** Ran the 20 mocked tests of the `.github/scripts` automation (pass; they do not prove real board changes). Grepped for leftover `OpenRouter`, `flow-<name>` and "8 emails"; only intentional history notes remain. No n8n flow was run.
+- **Remaining work at handoff:** Review, commit, push and PR are pending the user's permission. Create an issue for the event router. Provision `PROJECT_AUTOMATION_TOKEN` and move the status workflow to `main`.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
