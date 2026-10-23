@@ -9,7 +9,7 @@
 ## 2. Tests with real events
 
 - [x] 2.1 Save sample payloads for the four app events (copied from `docs/guia-de-la-app.md`) in `workflows/tests/00-event-router.md` with the expected route for each, and verify the file lists all four plus a malformed one.
-- [ ] 2.2 Publish the router and create a reservation and a deposit from the app UI; verify in n8n's Executions that both events were routed to the right output.
+- [x] 2.2 Publish the router and create a reservation and a deposit from the app UI; verify in n8n's Executions that both events were routed to the right output.
 - [ ] 2.3 Post `venta.registrada`, an unknown event, and a body without `evento`; verify the first two end successfully with no alert and the third triggers the error workflow.
 
 ## 3. Failure behaviour

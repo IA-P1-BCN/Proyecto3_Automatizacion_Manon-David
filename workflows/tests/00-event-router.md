@@ -25,6 +25,10 @@ Run on 2026-10-23 in a clean throwaway n8n 2.44.5 container (not the team's inst
 | 3, 4, 5 | router success; no stub ran |
 | 6, 7 | router error; no stub ran |
 
+### Run on the team's n8n (reported by Manon, 2026-10-23)
+
+With the stubs linked and everything published, the seven payloads and the real app's reservation and deposit events behaved as expected. Still pending: the flow 08 alert for #6 and #7 (waiting for PR #31), and the failing-handler tests.
+
 Not covered by this run: flow 08 attached to the router (alert email), a failing handler followed by another event, and events sent by the real app. Those are tasks 2.2, 2.3 and 3.x.
 
 ## Setup after importing
