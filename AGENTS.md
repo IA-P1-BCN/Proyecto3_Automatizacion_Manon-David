@@ -67,15 +67,15 @@ Each teammate has an independent local Docker environment containing both the sh
 
 | Integration | Agreed choice |
 | --- | --- |
-| Customer and shop email notifications | Gmail |
-| Bank-notification test input | A dedicated Gmail test mailbox |
+| Customer and shop email notifications | Infomaniak mailbox (SMTP) |
+| Bank-notification test input | The dedicated Infomaniak test mailbox (IMAP) |
 | Daily-closing history | Google Sheets |
 | AI provider inside workflows | Groq; exact model to be selected and documented |
 | Workflow versioning | Exported JSON in Git |
 | Workflow transfer baseline | Manual import/export through the n8n editor |
 | Agent assistance | n8n-mcp, when configured for the local instance |
 
-The test Gmail account must be created and verified by a team member. Never claim an account or integration exists without checking. Separate test accounts and Sheets per teammate are recommended but have not yet been confirmed. If a mailbox is reused, isolate test messages and consumers so the two instances cannot both register the same payment.
+The team's Infomaniak test mailbox must be verified by a team member before relying on it; each n8n instance needs its own SMTP and IMAP credentials, built with a mailbox password generated in Infomaniak. Never claim an account or integration exists without checking. Separate test accounts and Sheets per teammate are recommended but have not yet been confirmed. If a mailbox is reused, isolate test messages and consumers so the two instances cannot both register the same payment.
 
 Current local service addresses:
 
@@ -142,7 +142,7 @@ At the medium level, send reminders at 7 days and 1 day before the deadline only
 
 ## Security and test data
 
-- Keep Gmail/Google OAuth credentials, Groq keys, shop API keys, and n8n management keys in local environment configuration or n8n credentials, never in workflow parameters, tracked files, logs, or PR descriptions.
+- Keep mailbox (SMTP/IMAP) and Google OAuth credentials, Groq keys, shop API keys, and n8n management keys in local environment configuration or n8n credentials, never in workflow parameters, tracked files, logs, or PR descriptions.
 - Use the dedicated test mailbox and controlled test recipients for development. Do not send demo notifications to real customers.
 - Send only the minimum necessary information to Groq and document the external data flow. The advanced level additionally requires authenticated webhooks and consent-aware customer messaging.
 - Google Sheets stores information the app does not already maintain, such as closing history; do not create a competing ledger of balances.

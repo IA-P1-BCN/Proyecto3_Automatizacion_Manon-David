@@ -86,7 +86,7 @@ Reservation process map · repo with `workflows/` and an import README · list o
 
 ## 10. Assumptions
 - The app and its rules (minimum deposit €5, 90-day deadline, payment methods `efectivo|tarjeta|bizum`) don't change.
-- One Gmail account both reads (flow 03) and sends (the rest) ([decision](../docs/decisions-clarify.md#n8n-email-account)).
+- One Infomaniak mailbox both reads (flow 03, IMAP) and sends (the rest, SMTP) ([decision](../docs/decisions-clarify.md#n8n-email-account)).
 - Active reservations are identified by number or exact name; there is no customer table.
 - Consent is implied by giving an email ([decision](../docs/decisions-clarify.md#consent-to-receive-messages)).
 
@@ -95,7 +95,7 @@ Resolved in the clarification phase ([decisions](../docs/decisions-clarify.md)):
 
 | Topic | Decision |
 |---|---|
-| Email account | A single Gmail account to read and send |
+| Email account | A single Infomaniak mailbox: IMAP to read, SMTP to send |
 | AI model in n8n (flow 03) | Groq model, chosen by testing the 9 emails |
 | Close history (FR-31) | Google Sheets, one row per date (upsert) |
 | Daily close (FR-27) | 23:55 Europe/Madrid, covers the current day |

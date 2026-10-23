@@ -21,7 +21,7 @@ Fields delivered by the Error Trigger (n8n's names, not the ontology's):
 | `execution.error.message` | Error (sanitised before sending) |
 | `execution.mode` | `trigger` / `webhook` / `retry`… (informational) |
 
-Configuration: `TIENDA_EMAIL_AVISOS` (Marisa's address, see *Credentials and variables*).
+Configuration: `TIENDA_EMAIL_AVISOS` (Marisa's address), an environment variable read as `$env.TIENDA_EMAIL_AVISOS` (see *Credentials and variables*).
 
 ## Decisions
 1. **Always alert.** Every failed execution produces an email alert to the shop ([decision: channel](../docs/decisions-clarify.md#notification-channel)).
@@ -87,8 +87,9 @@ Automatic retries of failed flows; grouping or summarising alerts; alerting thro
 ## Credentials and variables
 | Name | Type | Purpose |
 |---|---|---|
-| Gmail (OAuth2) | n8n credential | Send the alert |
-| `TIENDA_EMAIL_AVISOS` | n8n variable | Address that receives alerts (no value in Git) |
+| Email account (SMTP, the team's Infomaniak mailbox) | n8n credential | Send the alert |
+| `TIENDA_EMAIL_FROM` | environment variable | Sender mailbox, same as the SMTP credential's account (no value in Git) |
+| `TIENDA_EMAIL_AVISOS` | environment variable (`.env` → `docker-compose.yml` → n8n container) | Address that receives alerts (no value in Git). n8n *Variables* (`$vars`) need a paid plan, so they are not used; requires `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` |
 
 ## Decisions made
 - Alert email failure: accepted and documented; no backup channel ([decision](../docs/decisions-clarify.md#alert-email-failure-and-repeated-alerts-flow-08)).

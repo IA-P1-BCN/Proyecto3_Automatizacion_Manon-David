@@ -120,6 +120,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** Ran the 20 mocked tests of the `.github/scripts` automation (pass; they do not prove real board changes). Grepped for leftover `OpenRouter`, `flow-<name>` and "8 emails"; only intentional history notes remain. No n8n flow was run.
 - **Remaining work at handoff:** Review, commit, push and PR are pending the user's permission. Create an issue for the event router. Provision `PROJECT_AUTOMATION_TOKEN` and move the status workflow to `main`.
 
+### AI-007 — Flow 08 Error Workflow skeleton and test flow (#5)
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** [#5 — HU-05 · Avisos de errores](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/5); branch `feat/5-error-workflow`; no PR yet.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "are we ready to start on HU-05?", "we will not pay anything in n8n... check that", "go ahead", "build the flow 08 skeleton", "go for it" (test flow).
+- **Accepted suggestions and reasons:** n8n Variables are paid, so the shop address is a plain environment variable read as `$env.TIENDA_EMAIL_AVISOS`, with `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. The host port is `${TIENDA_PORT:-8000}` so each teammate sets it in their own `.env`. Sanitiser developed as tested code (12 unit tests) and embedded in the exported JSON by a generator, so source and flow cannot drift. SMTP (the team's mailbox) replaces Gmail for sending.
+- **Rejected / deferred suggestions and reasons:** Exact-value masking of `API_KEY` skipped (n8n does not hold the app key; pattern masking covers headers and key=value pairs). README credential list (task 5.1) deferred because the README is the supplied assignment.
+- **Agent errors and corrections:** `docker compose up` was run without the project name of the running stack (`paso-firme`) and created a second stack; the stray containers and network were removed and the stack recreated with `-p paso-firme`, keeping the data volumes. Two empty volumes remain. A first edit script ignored CRLF line endings and failed before changes were left half-applied. The user pasted a mailbox password in the chat; it was not written to any file, and rotating it was advised.
+- **Verification and evidence:** 12 unit tests pass; both JSON files parse and import in a throwaway n8n container; `$env` access verified in a Code node and an expression there. In the user's n8n the five error scenarios were reported as passing; see `docs/evidence/08-error-workflow/README.md`. Scenario 6, timing and screenshots are still pending.
+- **Remaining work at handoff:** record scenario 6, timing and screenshots; PR into `dev`. Update: David confirmed the switch to the Infomaniak mailbox and the Gmail wording was replaced in `AGENTS.md`, the specs, the decisions and the OpenSpec changes.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
