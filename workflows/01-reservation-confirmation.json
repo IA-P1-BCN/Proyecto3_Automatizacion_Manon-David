@@ -1,0 +1,146 @@
+{
+  "name": "01 Reservation Confirmation",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "620d924a-cf23-42dd-8b64-a408e2513adb",
+      "name": "When Called By Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flow 01 · Reservation Confirmation — \"Format Confirmation\" Code node.\n// Pasted as-is into the Code node (mode: Run Once for All Items); also loaded by the tests.\n// Shows the app's figures exactly as the event carries them: nothing is recalculated (spec: figures come from the app).\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date so no timezone can shift the day.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction requireNumber(datos, field) {\n  if (typeof datos[field] !== 'number' || !Number.isFinite(datos[field])) {\n    throw new Error(`El aviso apartado.creado llegó sin «${field}» válido`);\n  }\n}\n\nfunction buildConfirmation(datos) {\n  if (!datos || typeof datos !== 'object') throw new Error('El aviso apartado.creado llegó sin datos');\n  ['precio', 'abonado', 'pendiente'].forEach((field) => requireNumber(datos, field));\n  if (!datos.id) throw new Error('El aviso apartado.creado llegó sin número de apartado');\n\n  // The app sends `talla: null` when the reservation has no size.\n  const size = String(datos.talla ?? '').trim();\n  const closing = 'Gracias por confiar en Zapatería Paso Firme.';\n  const summary = [\n    `Modelo:      ${datos.producto}`,\n    ...(size ? [`Talla:       ${size}`] : []),\n    `Precio:      ${formatEuros(datos.precio)}`,\n    `Abonado:     ${formatEuros(datos.abonado)}`,\n  ];\n\n  return {\n    emailValido: hasUsableEmail(datos.email),\n    to: hasUsableEmail(datos.email) ? datos.email.trim() : '',\n    confirmacion: {\n      subject: `Tu apartado en Paso Firme: ${datos.producto}`,\n      body: [\n        `Hola ${datos.cliente},`,\n        '',\n        `Hemos registrado tu apartado nº ${datos.id}.`,\n        '',\n        ...summary,\n        ...(datos.estado === 'liquidado'\n          ? ['', 'Tu apartado está totalmente pagado: ya puedes pasar por la tienda a recoger tus zapatos.']\n          : [`Pendiente:   ${formatEuros(datos.pendiente)}`, `Fecha límite: ${formatDate(datos.fecha_limite)}`]),\n        '',\n        closing,\n      ].join('\\n'),\n    },\n    aviso: {\n      subject: `Apartado sin confirmación: el apartado nº ${datos.id} no tiene email válido`,\n      body: [\n        'Se creó un apartado pero no se pudo enviar la confirmación a la clienta.',\n        '',\n        `Apartado nº: ${datos.id}`,\n        `Cliente:     ${datos.cliente}`,\n        ...(datos.telefono ? [`Teléfono:    ${datos.telefono}`] : []),\n        `Modelo:      ${datos.producto}`,\n        'Motivo:      el apartado no tiene email o el email no es válido.',\n      ].join('\\n'),\n    },\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { buildConfirmation };\n// Inside n8n there is no `module`; `$input` exists only there.\nif (typeof $input !== 'undefined') return [{ json: buildConfirmation($input.first().json.datos) }];\n"
+      },
+      "id": "eecd0980-9832-4d71-8286-ae47ad52a818",
+      "name": "Format Confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "b1a1c1d1-0101-4000-8000-000000000021",
+              "leftValue": "={{ $json.emailValido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "85090b71-baa3-48f4-9040-e45d27dbf6f3",
+      "name": "Has Usable Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.confirmacion.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.confirmacion.body }}",
+        "options": {}
+      },
+      "id": "cf5df816-2aba-476b-af9f-7dc0b93ad89c",
+      "name": "Send Customer Confirmation",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        704,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.aviso.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.aviso.body }}",
+        "options": {}
+      },
+      "id": "ee607e37-ca57-4496-b90f-308ae1b9ed09",
+      "name": "Send Shop Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        704,
+        192
+      ]
+    }
+  ],
+  "connections": {
+    "When Called By Router": {
+      "main": [
+        [
+          {
+            "node": "Format Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Has Usable Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Usable Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Customer Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Shop Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
