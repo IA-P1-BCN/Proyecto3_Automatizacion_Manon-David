@@ -1,0 +1,743 @@
+{
+  "id": "pasoFirmeDailyClose05",
+  "name": "05 Daily Close",
+  "active": false,
+  "nodes": [
+    {
+      "id": "daily-close-1",
+      "name": "Nightly 23:55",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "55 23 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "daily-close-2",
+      "name": "Scheduled Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nreturn [{json: {mode:'scheduled', send_email:true}}];"
+      }
+    },
+    {
+      "id": "daily-close-3",
+      "name": "Manual Close",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "daily-close-4",
+      "name": "Choose Date and Email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        200,
+        220
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mode",
+              "name": "mode",
+              "value": "manual",
+              "type": "string"
+            },
+            {
+              "id": "date",
+              "name": "fecha",
+              "value": "={{ $now.setZone(\"Europe/Madrid\").toFormat(\"yyyy-MM-dd\") }}",
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "name": "send_email",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "daily-close-5",
+      "name": "Prepare Close",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst input = inputDate($input.first().json, $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd'));\nconst drive = String($env.KDRIVE_DRIVE_ID || '');\nconst directory = String($env.KDRIVE_DIRECTORY_ID || '');\nif (!/^[1-9]\\d*$/.test(drive) || !/^[1-9]\\d*$/.test(directory)) throw new Error('Configure KDRIVE_DRIVE_ID y KDRIVE_DIRECTORY_ID.');\nreturn [{json: {...input, drive_id:drive, directory_id:directory}}];"
+      }
+    },
+    {
+      "id": "daily-close-6",
+      "name": "Fetch Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://tienda:8000/api/ventas",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Prepare Close').first().json.fecha }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Prepare Close').first().json.fecha }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "daily-close-7",
+      "name": "Fetch Deposits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://tienda:8000/api/abonos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Prepare Close').first().json.fecha }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Prepare Close').first().json.fecha }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "daily-close-8",
+      "name": "Calculate Close",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst sales = $('Fetch Sales').first().json;\nconst deposits = $('Fetch Deposits').first().json;\nif (sales.statusCode !== 200 || deposits.statusCode !== 200) throw new Error('No se pudo consultar la API de la tienda.');\nreturn [{json:{...$('Prepare Close').first().json, ...calculate($('Prepare Close').first().json.fecha, sales.body, deposits.body)}}];"
+      }
+    },
+    {
+      "id": "daily-close-9",
+      "name": "Email Requested",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "email",
+              "leftValue": "={{ $json.send_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "daily-close-10",
+      "name": "Send Closing Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1550,
+        -120
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "daily-close-11",
+      "name": "Remember Email Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nreturn [{json:{email_failed: Boolean($input.first().json.error)}}];"
+      }
+    },
+    {
+      "id": "daily-close-12",
+      "name": "Email Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1550,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nreturn [{json:{email_failed:false}}];"
+      }
+    },
+    {
+      "id": "daily-close-13",
+      "name": "List History Folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.infomaniak.com/3/drive/{{ $('Prepare Close').first().json.drive_id }}/files/{{ $('Prepare Close').first().json.directory_id }}/files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "cursor",
+                    "value": "={{ $response.body.cursor || \"\" }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.has_more === false }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "with",
+              "value": "etag"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "daily-close-14",
+      "name": "Locate History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst file = findHistory($input.all().map(item => item.json));\nconst email_failed = $('Remember Email Result').isExecuted ? $('Remember Email Result').first().json.email_failed : false;\nreturn [{json:{...$('Calculate Close').first().json, email_failed, file}}];"
+      }
+    },
+    {
+      "id": "daily-close-15",
+      "name": "History Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "exists",
+              "leftValue": "={{ $json.file !== null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "daily-close-16",
+      "name": "Download History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.infomaniak.com/2/drive/{{ $('Prepare Close').first().json.drive_id }}/files/{{ $json.file.id }}/download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "daily-close-17",
+      "name": "Update History CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst response = $input.first().json;\nconst csvText = response.data;\nif (response.statusCode !== 200 || typeof csvText !== 'string') throw new Error('No se pudo leer el histórico existente.');\nconst state = $('Locate History').first().json;\nreturn [{json:{...state, csv:upsertHistory(csvText, state.row)}}];"
+      }
+    },
+    {
+      "id": "daily-close-18",
+      "name": "Create History CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        220
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst state = $input.first().json;\nreturn [{json:{...state, csv:upsertHistory(null,state.row)}}];"
+      }
+    },
+    {
+      "id": "daily-close-19",
+      "name": "Prepare Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst state = $input.first().json;\nconst size = Buffer.byteLength(state.csv, 'utf8');\nif (size > 5000000) throw new Error('Histórico demasiado grande para este flujo; revisar antes de modificar.');\nconst query = state.file ? 'file_id='+state.file.id : 'directory_id='+state.directory_id+'&file_name=basedatos.csv&conflict=error';\nconst url = 'https://api.infomaniak.com/3/drive/'+state.drive_id+'/upload?'+query+'&total_size='+size+'&with=etag';\nreturn [{json:{...state,upload_url:url,if_match:state.file ? state.file.etag : 'blank'}, binary:{data:await this.helpers.prepareBinaryData(Buffer.from(state.csv,'utf8'),'basedatos.csv','text/csv')}}];"
+      }
+    },
+    {
+      "id": "daily-close-20",
+      "name": "Save History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.upload_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "If-Match",
+              "value": "={{ $json.if_match }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/octet-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      }
+    },
+    {
+      "id": "daily-close-21",
+      "name": "Verify Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure logic shared by the generator and tests. No credentials or network access.\nconst METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\nconst MONEY_COLUMNS = ['ventas_efectivo', 'ventas_tarjeta', 'ventas_bizum', 'ventas_otros',\n  'abonos_efectivo', 'abonos_tarjeta', 'abonos_bizum', 'abonos_otros', 'total_ventas', 'total_abonos', 'total'];\nconst COLUMNS = ['fecha', ...MONEY_COLUMNS];\n\nfunction validDate(value) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction inputDate(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  if (fecha > today) throw new Error('No se puede cerrar una fecha futura.');\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de cierre no válido.');\n  if (input.send_email !== undefined && typeof input.send_email !== 'boolean') throw new Error('send_email debe ser booleano.');\n  return { fecha, send_email: scheduled || input.send_email === true, mode: input.mode };\n}\n\nfunction cents(value) {\n  const text = String(value);\n  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(text)) throw new Error('Importe inválido o precisión superior a céntimos.');\n  const [whole, decimals = ''] = text.split('.');\n  const result = Number(whole) * 100 + Number(decimals.padEnd(2, '0'));\n  if (!Number.isSafeInteger(result)) throw new Error('Importe fuera del rango seguro.');\n  return result;\n}\n\nfunction sumSafe(a, b) {\n  const result = a + b;\n  if (!Number.isSafeInteger(result)) throw new Error('Total fuera del rango seguro.');\n  return result;\n}\n\nfunction decimal(value) { return `${Math.floor(value / 100)},${String(value % 100).padStart(2, '0')}`; }\n\nfunction calculate(fecha, sales, deposits) {\n  validDate(fecha);\n  const row = { fecha, ...Object.fromEntries(MONEY_COLUMNS.map((key) => [key, 0])) };\n  let count = 0;\n  for (const [source, records] of [['ventas', sales], ['abonos', deposits]]) {\n    if (!Array.isArray(records)) throw new Error('La API no devolvió una lista de movimientos.');\n    const seen = new Set();\n    for (const record of records) {\n      if (record.fecha !== fecha || !Number.isSafeInteger(record.id) || seen.has(record.id)) {\n        throw new Error('Movimiento con fecha/id incorrectos o duplicado en la API.');\n      }\n      seen.add(record.id);\n      const method = METHODS.includes(record.forma_pago) ? record.forma_pago : 'otros';\n      const amount = cents(record.importe);\n      row[`${source}_${method}`] = sumSafe(row[`${source}_${method}`], amount);\n      row[`total_${source}`] = sumSafe(row[`total_${source}`], amount);\n      count++;\n    }\n  }\n  row.total = sumSafe(row.total_ventas, row.total_abonos);\n  const displayDate = fecha.split('-').reverse().join('/');\n  const lines = [`Cierre de caja del ${displayDate}`, '',\n    ...(count ? [] : ['No hubo movimientos.', '']),\n    'Forma de pago | Ventas | Abonos | Total'];\n  for (const method of METHODS) {\n    lines.push(`${method}: ${decimal(row[`ventas_${method}`])} € | ${decimal(row[`abonos_${method}`])} € | ${decimal(row[`ventas_${method}`] + row[`abonos_${method}`])} €`);\n  }\n  lines.push('', `Ventas directas: ${decimal(row.total_ventas)} €`, `Abonos: ${decimal(row.total_abonos)} €`,\n    `Total cobrado: ${decimal(row.total)} €`, '', 'Bizum incluye transferencias bancarias.',\n    'Importes consultados a la API en este cierre. Los movimientos posteriores a las 23:55 requieren recalcular esa fecha.',\n    'El correo no confirma por sí solo que el histórico se haya guardado; un fallo de guardado genera una alerta independiente.');\n  return { row, count, subject: `Cierre de caja — ${displayDate}`, body: lines.join('\\n') };\n}\n\nfunction parseHistory(text) {\n  if (typeof text !== 'string' || !text.trim()) throw new Error('Histórico vacío o inválido; no se sobrescribirá.');\n  const lines = text.replace(/^\\uFEFF/, '').replace(/\\r\\n/g, '\\n').replace(/\\n$/, '').split('\\n');\n  if (lines.shift() !== COLUMNS.join(';')) throw new Error('Cabecera CSV no reconocida; no se sobrescribirá.');\n  const result = new Map();\n  for (const line of lines) {\n    const values = line.split(';');\n    if (values.length !== COLUMNS.length) throw new Error('Fila CSV dañada.');\n    const fecha = validDate(values[0]);\n    if (result.has(fecha)) throw new Error('Fechas duplicadas en el histórico.');\n    const row = { fecha };\n    MONEY_COLUMNS.forEach((key, i) => {\n      if (!/^\\d+,\\d{2}$/.test(values[i + 1])) throw new Error('Importe CSV no válido.');\n      row[key] = cents(values[i + 1].replace(',', '.'));\n    });\n    for (const source of ['ventas', 'abonos']) {\n      if (METHODS.reduce((sum, method) => sumSafe(sum, row[`${source}_${method}`]), 0) !== row[`total_${source}`]) throw new Error('Totales históricos inconsistentes.');\n    }\n    if (sumSafe(row.total_ventas, row.total_abonos) !== row.total) throw new Error('Total histórico inconsistente.');\n    result.set(fecha, row);\n  }\n  return result;\n}\n\nfunction upsertHistory(existing, row) {\n  const rows = existing === null ? new Map() : parseHistory(existing);\n  rows.set(row.fecha, row);\n  const lines = [COLUMNS.join(';')];\n  for (const [, record] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {\n    lines.push([record.fecha, ...MONEY_COLUMNS.map((key) => decimal(record[key]))].join(';'));\n  }\n  return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';\n}\n\nfunction findHistory(pages) {\n  if (!Array.isArray(pages) || !pages.length) throw new Error('No hay respuesta del listado kDrive.');\n  const matches = [];\n  for (let i = 0; i < pages.length; i++) {\n    const response = pages[i];\n    if (response.statusCode !== 200 || response.body?.result !== 'success' || !Array.isArray(response.body.data)) throw new Error('No se pudo listar kDrive; no se creará ningún fichero.');\n    if (typeof response.body.has_more !== 'boolean' || (i === pages.length - 1 && response.body.has_more)) throw new Error('Listado kDrive incompleto; no se creará ningún fichero.');\n    matches.push(...response.body.data.filter((file) => file.name === 'basedatos.csv'));\n  }\n  if (matches.length > 1) throw new Error('Hay varios históricos con el mismo nombre.');\n  const file = matches[0];\n  if (file && (file.type !== 'file' || !['ok', null].includes(file.status) || !Number.isSafeInteger(file.id) || !/^[a-fA-F0-9]{16,32}$/.test(file.etag || ''))) throw new Error('El histórico está bloqueado o no tiene ETag válido; no se sobrescribirá.');\n  return file || null;\n}\n\nif (typeof module !== 'undefined') module.exports = { COLUMNS, cents, inputDate, calculate, parseHistory, upsertHistory, findHistory };\n\nconst response = $input.first().json;\nconst state = $('Prepare Upload').first().json;\nif (response.body?.result !== 'success' || !Number.isSafeInteger(response.body?.data?.id)) throw new Error('kDrive no confirmó el guardado; revisar antes de repetir.');\nif (state.file && response.body.data.id !== state.file.id) throw new Error('kDrive devolvió un ID distinto del histórico.');\nif (state.email_failed) throw new Error('El histórico se guardó, pero falló el envío del resumen. Revisar credencial SMTP.');\nreturn [{json:{fecha:state.fecha,total_centimos:state.row.total,history_file_id:response.body.data.id,email_requested:state.send_email,history_saved:true}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Nightly 23:55": {
+      "main": [
+        [
+          {
+            "node": "Scheduled Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Close": {
+      "main": [
+        [
+          {
+            "node": "Choose Date and Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Date and Email": {
+      "main": [
+        [
+          {
+            "node": "Prepare Close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Close": {
+      "main": [
+        [
+          {
+            "node": "Fetch Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Sales": {
+      "main": [
+        [
+          {
+            "node": "Fetch Deposits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Deposits": {
+      "main": [
+        [
+          {
+            "node": "Calculate Close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Close": {
+      "main": [
+        [
+          {
+            "node": "Email Requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Closing Email": {
+      "main": [
+        [
+          {
+            "node": "Remember Email Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember Email Result": {
+      "main": [
+        [
+          {
+            "node": "List History Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Skipped": {
+      "main": [
+        [
+          {
+            "node": "List History Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List History Folder": {
+      "main": [
+        [
+          {
+            "node": "Locate History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Locate History": {
+      "main": [
+        [
+          {
+            "node": "History Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download History": {
+      "main": [
+        [
+          {
+            "node": "Update History CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update History CSV": {
+      "main": [
+        [
+          {
+            "node": "Prepare Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create History CSV": {
+      "main": [
+        [
+          {
+            "node": "Prepare Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Upload": {
+      "main": [
+        [
+          {
+            "node": "Save History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save History": {
+      "main": [
+        [
+          {
+            "node": "Verify Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Requested": {
+      "main": [
+        [
+          {
+            "node": "Send Closing Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History Exists": {
+      "main": [
+        [
+          {
+            "node": "Download History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create History CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

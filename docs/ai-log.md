@@ -144,6 +144,42 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** Clean n8n container: seven payloads routed as expected and a failing handler did not block the next event. Team n8n (reported): payloads, real app events, malformed-event alerts, failing handler. Finding: only a handler's own Error Workflow setting fires for its failure (alert absent with router-only, present once set on the handler). Details in `workflows/tests/00-event-router.md`.
 - **Remaining work at handoff:** export and docs tasks (4.1 to 4.3) and review of PR #33.
 
+### AI-009 — Local Docker ports for HU-04 preparation
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** #4 — HU-04 · Cierre de caja automático; branch `feat/4-daily-close` from updated `origin/dev`. No PR for this task yet.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`.
+- **Prompt / request:** “haz los cambios para que dependan de las variables en .env, y crea una rama para issue HU-04 con los cambios”.
+- **Accepted decisions and reasons:** Keep browser ports in each teammate's ignored `.env` so Git updates do not replace local preferences. Reuse `TIENDA_PORT` already integrated by Manon and add `N8N_PORT_HOST`; internal service ports stay 8000 and 5678. Preserve the merged HU-05 environment configuration.
+- **Agent errors and corrections:** The earlier local Compose edit used fixed host ports on the #27 working tree. Removed only that edit before creating #4's branch from current `origin/dev`, then implemented the requested parameterization in the proper branch.
+- **Verification and evidence:** Confirmed #4 is open and assigned to `davidlafuentem`, and `.env` is ignored by Git. Prior fixed mappings returned HTTP 200 for both services. Compose resolution and HTTP checks for the parameterized setup are verified at handoff; no financial workflow execution is claimed.
+- **Remaining work at handoff:** Implement and test HU-04 separately after its specification review. This environment preparation is not completion of HU-04. Commit, push, and PR require permission. The earlier personal-kit conversation remains excluded from this log.
+
+### AI-010 — HU-04 kDrive CSV implementation and local verification
+
+- **Date:** 2026-10-23 (Europe/Madrid).
+- **Related issue / PR:** #4 — HU-04 · Cierre de caja automático; `feat/4-daily-close`, no PR yet.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`; Node.js tests; isolated Docker n8n import; Infomaniak developer documentation.
+- **Prompt excerpts:** “comienza, ejecuta la creación del flujo que cree ese fichero, y en el que se vaya generando el cierre (todo lo necesario para la hu-04)”; “los separadores de columna que sean \";\" para que no se confundan con los decimales.”
+- **Accepted decisions and reasons:** Replace Google Sheets with the free-account kDrive API; history is `basedatos.csv`, created once and replaced by the same file ID. Use semicolons, decimal commas and UTF-8 BOM. Recalculate one date without duplicate rows; manual email is opt-in. Keep unrelated files untouched. Schedule remains 23:55 Madrid; later same-date transactions require a manual rerun, correcting the old spec's inaccurate next-day claim.
+- **Connection context:** User confirmed SMTP works after local sender/recipient configuration. A drive-scoped token was created in n8n; the user reported successful drive listing after adding the required account_id. No token was copied into repository files. WebDAV is not assumed available on the free plan. A previous overly broad token was discouraged; no claim is made about its revocation.
+- **Implementation:** Generated inactive `workflows/05-daily-close.json` with schedule/manual inputs, complete-array API reads, cent arithmetic, optional Spanish SMTP, paginated history discovery, strict CSV upsert and ETag-protected upload. Separate tested source and generator follow the existing flow 08 pattern. Configured non-secret destination IDs only in the ignored `.env`, passed through Compose; exports contain no actual account/Drive/folder IDs or credential associations.
+- **Agent errors and corrections:** OpenSpec CLI was unavailable, so its existing artifacts were updated directly and no CLI validation is claimed. First disposable import required an explicit workflow ID; the generator now provides a stable non-secret ID and the second import succeeded. Initial generated-Code syntax test used a synchronous Function parser, which incorrectly rejected valid async binary preparation; corrected the harness to AsyncFunction and added execution tests for the embedded create/update/result stages.
+- **Verification and evidence:** 15 HU-04 unit/embedded-code tests and 12 unchanged HU-05 tests passed. Export imported successfully into an isolated disposable n8n container with no network access or user volumes. Read-only local API records for 2026-10-23, 2026-10-22 and 2026-10-21 were independently summed using Python Decimal and matched the shared calculation source (21365, 27390 and 5690 combined cents). No customer data or API key was printed. Compose destination values resolved correctly and were applied without deleting volumes. See `docs/evidence/05-daily-close/README.md`, `workflows/tests/05-daily-close.md` and `docs/daily-close-setup.md`; live n8n/cloud tests are pending.
+- **Remaining work at handoff:** Import in the user's n8n, associate shop Header Auth, kDrive Header Auth (`token_n8n`) and SMTP, select the local flow 08 reference, run first creation and same-ID replacement against kDrive, compare three app dates, capture evidence and test schedule/error delivery with explicit publication permission. No actual cloud file, financial records, new email or live n8n workflow was created by this implementation. Commit/push/PR and issue-checklist synchronization require permission; the GitHub issue's older Sheets checklist has not been silently edited.
+
+### AI-011 — Manual integration feedback and HU-04 review publication
+
+- **Date:** 2026-10-24 (Europe/Madrid); manual feedback includes the preceding evening.
+- **Related issue / PR:** #4 — HU-04 · Cierre de caja automático; `feat/4-daily-close`. The requested review PR targets `dev` with Manon as reviewer; its final URL is reported at publication time.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`; Node.js and GitHub CLI.
+- **Prompt / request:** User confirmed successful SMTP, kDrive creation, second-date update and repeated dates without duplicate lines, then requested “publica la issue, haz commit y pr para Manon” and “ejecuta”. This authorizes the delivery commit, push, issue checklist synchronization and PR; not merge or a claim of full acceptance.
+- **Agent error and correction:** Actual n8n text download output contains CSV under `data`; the generated update originally read `body`. The user corrected the live workflow manually. Repository generator and regression tests now consistently use `data` for this text response; JSON HTTP responses still use `body`. The user's exported workflow retained that correction.
+- **Export preparation:** Preserved an exact copy of the manual export outside Git before regenerating a credential-free inactive export. Restored safe manual defaults (today, no email), explicit Madrid workflow timezone and pagination limits. Removed local credential references/metadata through the generator; no changes were made to the live n8n workflow or cloud file.
+- **Verification:** 29 local tests passed (17 HU-04 and 12 unchanged HU-05). Prior read-only API comparisons and disposable import are documented separately. Reported manual results are distinguished from agent-executed tests in `docs/evidence/05-daily-close/README.md`.
+- **Pending acceptance:** Real empty-day and output-failure tests, automatic Error Workflow dispatch, scheduled execution and same-file-ID confirmation remain unverified. User requested insertion-order rows after observing ascending-date sorting; that change is explicitly listed as pending, not silently treated as complete. The review PR uses `Refs #4`, not `Closes #4`, so its merge must not automatically close an incomplete issue.
+- **Exclusion:** Personal kit configuration/sharing discussions remain outside this project log; no contents from those discussions are included in this entry.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
