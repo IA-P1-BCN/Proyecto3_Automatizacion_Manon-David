@@ -69,7 +69,7 @@ Each teammate has an independent local Docker environment containing both the sh
 | --- | --- |
 | Customer and shop email notifications | Infomaniak mailbox (SMTP) |
 | Bank-notification test input | The dedicated Infomaniak test mailbox (IMAP) |
-| Daily-closing history | Google Sheets |
+| Daily-closing history | kDrive API, `basedatos.csv` (UTF-8, semicolons, decimal commas); see `docs/daily-close-setup.md` |
 | AI provider inside workflows | Groq; exact model to be selected and documented |
 | Workflow versioning | Exported JSON in Git |
 | Workflow transfer baseline | Manual import/export through the n8n editor |
@@ -145,7 +145,7 @@ At the medium level, send reminders at 7 days and 1 day before the deadline only
 - Keep mailbox (SMTP/IMAP) and Google OAuth credentials, Groq keys, shop API keys, and n8n management keys in local environment configuration or n8n credentials, never in workflow parameters, tracked files, logs, or PR descriptions.
 - Use the dedicated test mailbox and controlled test recipients for development. Do not send demo notifications to real customers.
 - Send only the minimum necessary information to Groq and document the external data flow. The advanced level additionally requires authenticated webhooks and consent-aware customer messaging.
-- Google Sheets stores information the app does not already maintain, such as closing history; do not create a competing ledger of balances.
+- kDrive stores closing history the app does not already maintain; do not create a competing ledger of balances. HU-04 replaces its previous Google Sheets plan by explicit user decision. Never write over unrelated files or infer file absence from an API error.
 - Migration must preserve original dates, normalize names/dates/amounts, avoid duplicates on rerun, and report questionable data for Marisa's decision. The sales CSV includes layaway payments already represented in the layaway CSV: do not import them again as direct sales. Skip manually entered total rows.
 
 ## Verification and definition of done

@@ -11,6 +11,7 @@ n8n automations for a shoe shop's layaway ("apartado") system. The FastAPI app i
 - `docs/decisions-clarify.md`: decisions already made. Don't re-ask them.
 - `docs/future-implementation-ideas.md`: what was postponed on purpose.
 - `openspec/`: where specs live (see Specs below).
+- HU-04 history now uses the kDrive API and `basedatos.csv` instead of Google Sheets, by David's explicit decision. See `docs/daily-close-setup.md`; semicolon columns, decimal commas, one row/date, optional email on manual reruns. Other agents must not replace this decision with the old Sheets plan.
 
 ## Rules that matter most
 1. The app is the source of truth for amounts, states and deadlines. Flows and AI never recalculate them.

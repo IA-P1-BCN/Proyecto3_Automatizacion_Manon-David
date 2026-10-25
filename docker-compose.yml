@@ -15,13 +15,15 @@ services:
   n8n:
     image: docker.n8n.io/n8nio/n8n
     ports:
-      - "5678:5678"
+      - "${N8N_PORT_HOST:-5678}:5678"
     environment:
       - TZ=Europe/Madrid
       - GENERIC_TIMEZONE=Europe/Madrid
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - TIENDA_EMAIL_AVISOS=${TIENDA_EMAIL_AVISOS:-}
       - TIENDA_EMAIL_FROM=${TIENDA_EMAIL_FROM:-}
+      - KDRIVE_DRIVE_ID=${KDRIVE_DRIVE_ID:-}
+      - KDRIVE_DIRECTORY_ID=${KDRIVE_DIRECTORY_ID:-}
     volumes:
       - n8n_data:/home/node/.n8n
 
