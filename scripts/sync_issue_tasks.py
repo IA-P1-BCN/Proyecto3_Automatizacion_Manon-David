@@ -15,8 +15,8 @@ HEADING = '## Implementation tasks'
 ISSUES = {
     5: ('add-error-workflow', 'origin/feat/5-error-workflow'),
     32: ('add-event-router', 'WORKTREE'),
-    1: ('add-reservation-confirmation', 'origin/dev'),
-    2: ('add-deposit-receipt', 'origin/dev'),
+    1: ('add-reservation-confirmation', 'WORKTREE'),
+    2: ('add-deposit-receipt', 'WORKTREE'),
     3: ('add-remote-deposits', 'origin/dev'),
     4: ('add-daily-close', 'origin/dev'),
 }

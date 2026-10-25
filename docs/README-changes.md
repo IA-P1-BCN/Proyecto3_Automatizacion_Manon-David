@@ -1,6 +1,6 @@
 # README changes to apply
 
-`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow` and task 4.2 of `openspec/changes/add-event-router`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
+`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow`, task 4.2 of `openspec/changes/add-event-router` and task 3.2 of `openspec/changes/add-deposit-receipt` and task 3.2 of `openspec/changes/add-reservation-confirmation`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
 
 ## 1. Credentials and variables used by flow 08 (task 5.1)
 
@@ -51,3 +51,41 @@ Suggested text for the README (webhook, URLs, publishing and lost events):
 > **Si n8n está parado o el router no está publicado, el aviso se pierde:** la app envía cada evento una sola vez, sin reintentos. Antes de una demo: `docker compose up -d` y el router publicado. Los flujos programados (cierre diario, recordatorios) no dependen de estos avisos, porque consultan la API.
 
 Checked: the routing, import and Error Workflow steps were run in a clean throwaway n8n and in the team's n8n (see `workflows/tests/00-event-router.md`). A literal `docker compose up -d` from an empty volume was not repeated for this task.
+
+## 5. Deposit receipt, flow 02 (deposit-receipt task 3.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 02 introduces nothing new: it reuses what flows 08 and 00 already need.
+
+| Name | Type | Used for |
+|---|---|---|
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the three *Send …* nodes | Send the receipt to the customer and the alert to the shop |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of the receipt |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the "deposit without a valid email" notice (Marisa) |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 02 | Alert when sending the receipt fails |
+
+Suggested text:
+
+> **Recibo de cada abono (flujo 02).** Cada vez que la app registra un abono, desde la pantalla o desde la API, el router llama al flujo `02 Deposit Receipt`, que envía a la clienta un recibo con lo abonado, lo pendiente y la fecha límite, tal y como los calcula la app. Si el abono deja el apartado `liquidado`, el mensaje le dice que ya puede recoger sus zapatos. Si el apartado no tiene email, o el email no tiene `@`, no se envía nada a la clienta y la tienda recibe un aviso con el número de apartado, la clienta, el teléfono y lo abonado. El abono inicial de un apartado nuevo no genera este recibo: lo cubre la confirmación del flujo 01.
+>
+> **Puesta en marcha.** Importa `workflows/02-deposit-receipt.json`, elige tu credencial SMTP en los tres nodos *Send …*, pon *Settings → Error Workflow → `08 Error Workflow`*, publícalo, y en el router elige este flujo en el nodo *Call Deposit Receipt (flow 02)*. Si n8n está parado cuando se registra el abono, no hay recibo: la app no reintenta.
+
+Checked: payloads and results in `workflows/tests/02-deposit-receipt.md`.
+
+## 6. Reservation confirmation, flow 01 (reservation-confirmation task 3.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 01 introduces nothing new: it reuses what flows 08, 00 and 02 already need.
+
+| Name | Type | Used for |
+|---|---|---|
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the two *Send …* nodes | Send the confirmation to the customer and the alert to the shop |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of the confirmation |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the "reservation without a valid email" notice (Marisa) |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 01 | Alert when sending the confirmation fails |
+
+Suggested text:
+
+> **Confirmación al apartar (flujo 01).** Cada vez que se crea un apartado, desde la pantalla o desde la API, el router llama al flujo `01 Reservation Confirmation`, que envía a la clienta un correo con el modelo, la talla (si la hay), el precio, lo abonado, lo pendiente y la fecha límite, tal y como los da la app. Si el apartado ya nace `liquidado`, el mensaje le dice que puede recoger sus zapatos. Si el apartado no tiene email, o el email no tiene `@`, no se envía nada a la clienta y la tienda recibe un aviso con el número de apartado, la clienta, el teléfono y el modelo, para que la contacte.
+>
+> **Puesta en marcha.** Importa `workflows/01-reservation-confirmation.json`, elige tu credencial SMTP en los dos nodos *Send …*, pon *Settings → Error Workflow → `08 Error Workflow`*, publícalo, y en el router elige este flujo en el nodo *Call Reservation Confirmation (flow 01)*. Si n8n está parado cuando se crea el apartado, no hay confirmación: la app no reintenta.
+
+Checked: payloads and results in `workflows/tests/01-reservation-confirmation.md`. Screenshots of the received emails: `docs/evidence/01-reservation-confirmation/`.
