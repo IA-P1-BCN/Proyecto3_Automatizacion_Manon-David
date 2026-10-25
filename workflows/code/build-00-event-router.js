@@ -1,17 +1,18 @@
-// Regenerates the event router and its two stub handlers.
+// Regenerates the event router and its stub handlers.
 // Run from the repo root: node workflows/code/build-00-event-router.js
 const fs = require('node:fs');
 
 const id = (n) => `b1a1c1d1-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
 const write = (path, workflow) => fs.writeFileSync(path, `${JSON.stringify(workflow, null, 2)}\n`);
 
-const eventIs = (name) => ({
+// Condition ids must be unique per rule; the name length alone collides for two 16-letter events.
+const eventIs = (name, conditionId = id(40 + name.length)) => ({
   outputKey: name,
   conditions: {
     options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' },
     conditions: [
       {
-        id: id(40 + name.length),
+        id: conditionId,
         leftValue: '={{ $json.evento }}',
         rightValue: name,
         operator: { type: 'string', operation: 'equals' },
@@ -88,18 +89,19 @@ write('workflows/00-event-router.json', {
       typeVersion: 3.2,
       position: [440, 0],
       parameters: {
-        rules: { values: [eventIs('apartado.creado'), eventIs('abono.registrado'), missingEvent] },
+        rules: { values: [eventIs('apartado.creado'), eventIs('abono.registrado'), eventIs('venta.registrada', id(61)), missingEvent] },
         options: { fallbackOutput: 'extra', renameFallbackOutput: 'unhandled event' },
       },
     },
     callHandler(4, 'Call Reservation Confirmation (flow 01)', [700, -120]),
     callHandler(5, 'Call Deposit Receipt (flow 02)', [700, 20]),
+    callHandler(8, 'Call Large Sale Alert (flow 04)', [700, 160]),
     {
       id: id(6),
       name: 'Reject Event Without Name',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
-      position: [700, 160],
+      position: [700, 300],
       parameters: {
         jsCode: "throw new Error('El aviso de la tienda llegó sin nombre de evento');",
       },
@@ -109,7 +111,7 @@ write('workflows/00-event-router.json', {
       name: 'Ignore Unhandled Event',
       type: 'n8n-nodes-base.noOp',
       typeVersion: 1,
-      position: [700, 300],
+      position: [700, 440],
       parameters: {},
     },
   ],
@@ -120,6 +122,7 @@ write('workflows/00-event-router.json', {
       main: [
         [{ node: 'Call Reservation Confirmation (flow 01)', type: 'main', index: 0 }],
         [{ node: 'Call Deposit Receipt (flow 02)', type: 'main', index: 0 }],
+        [{ node: 'Call Large Sale Alert (flow 04)', type: 'main', index: 0 }],
         [{ node: 'Reject Event Without Name', type: 'main', index: 0 }],
         [{ node: 'Ignore Unhandled Event', type: 'main', index: 0 }],
       ],
