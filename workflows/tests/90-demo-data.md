@@ -49,7 +49,7 @@ Unit tests: 11 of 11 pass (2026-10-26).
 | Second run | success: 0 created, 5 skipped; the app still held 33 reservations, 5 of them demo |
 | Partly-loaded case, wrong URL to flow 08, pinned list (tasks 1.2, 2.1, 2.4) | confirmed by Manon in the editor; not run by the agent |
 
-Evidence: `docs/evidence/90-demo-data/`.
+Evidence in `docs/evidence/90-demo-data/`: `app-29` to `app-33` are the app's detail screens of the five demo reservations (id 29 to 33); `email-01` to `email-07` are the seven emails received.
 
 ## Known limits
 
