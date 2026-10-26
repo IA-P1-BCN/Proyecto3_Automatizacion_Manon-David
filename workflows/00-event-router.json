@@ -104,6 +104,28 @@
               }
             },
             {
+              "outputKey": "venta.registrada",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "b1a1c1d1-0000-4000-8000-000000000061",
+                    "leftValue": "={{ $json.evento }}",
+                    "rightValue": "venta.registrada",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
               "outputKey": "missing event name",
               "conditions": {
                 "options": {
@@ -178,13 +200,35 @@
       }
     },
     {
+      "id": "b1a1c1d1-0000-4000-8000-000000000008",
+      "name": "Call Large Sale Alert (flow 04)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        700,
+        160
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
       "id": "b1a1c1d1-0000-4000-8000-000000000006",
       "name": "Reject Event Without Name",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         700,
-        160
+        300
       ],
       "parameters": {
         "jsCode": "throw new Error('El aviso de la tienda llegó sin nombre de evento');"
@@ -197,7 +241,7 @@
       "typeVersion": 1,
       "position": [
         700,
-        300
+        440
       ],
       "parameters": {}
     }
@@ -237,6 +281,13 @@
         [
           {
             "node": "Call Deposit Receipt (flow 02)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Large Sale Alert (flow 04)",
             "type": "main",
             "index": 0
           }
