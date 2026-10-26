@@ -111,3 +111,29 @@ Suggested text:
 > **Puesta en marcha.** Importa `workflows/04-large-sale-alert.json`, elige tu credencial SMTP en el nodo *Send Large Sale Alert*, pon *Settings → Error Workflow → `08 Error Workflow`*, publícalo, y en el router elige este flujo en el nodo *Call Large Sale Alert (flow 04)*. Publica el flujo 04 antes que el router. Si n8n está parado cuando se registra la venta, el aviso se pierde: la app no reintenta.
 
 Checked: payloads and results in `workflows/tests/04-large-sale-alert.md`.
+
+## 9. Due date reminders, flow 06 (due-reminders task 5.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 06 reuses what flows 05, 08 and 02 already need and adds no new variable:
+
+| Name | Type | Used for |
+|---|---|---|
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in the *Fetch Reservations* node | Read the active reservations from the app |
+| kDrive Header Auth (the one of flow 05) | n8n credential, chosen in *List Records Folder*, *Download Records* and *Save Records* | Read and write `avisos.csv` |
+| `KDRIVE_DRIVE_ID`, `KDRIVE_DIRECTORY_ID` | environment variables in `.env` (passed to n8n by `docker-compose.yml`) | Drive and folder that hold `avisos.csv`, next to `basedatos.csv` |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Reminder* node | Send the reminders and the shop alerts |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the "no valid email" alerts (Marisa) |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of every email |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 06 | Alert when the app, kDrive or the email service fails, or when `avisos.csv` has the wrong columns |
+
+Suggested text:
+
+> **Recordatorios de vencimiento (flujo 06).** Cada mañana a las 09:00 (hora de Madrid) el flujo `06 Due Date Reminders` consulta a la app los apartados `activo` y avisa por correo a los clientes cuyo plazo vence **dentro de 7 días** y **dentro de 1 día**. El mensaje lleva el modelo, la talla, lo que falta por pagar, lo ya abonado y la fecha límite, tal como los da la app. Cada cliente recibe cada aviso **una sola vez**: el flujo apunta cada envío en el fichero `avisos.csv` de kDrive (`apartado_id;umbral;resultado;fecha_envio`), junto a `basedatos.csv`. Si el apartado no tiene correo válido, el aviso va a la tienda y se apunta como `sin_email`.
+>
+> **Ejecutarlo a mano para otra fecha.** Abre *Choose Date*, pon en `fecha` el día que quieres simular (`AAAA-MM-DD`) y ejecuta desde *Manual Run*. Repetir la misma fecha no vuelve a enviar nada.
+>
+> **Si algo falla.** Si el envío de un correo falla, los que sí salieron quedan apuntados, el flujo falla y el flujo 08 avisa; al repetir, solo se reintentan los que faltan. Si el correo salió pero no se pudo guardar `avisos.csv`, el flujo falla y avisa: revisa el fichero antes de la próxima mañana para no repetir el aviso.
+>
+> **Puesta en marcha.** Importa `workflows/06-due-reminders.json`, elige las credenciales (clave de la tienda, kDrive y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo. Si n8n está parado a las 09:00, ese día no se envían los recordatorios y no se recuperan solos: ejecuta el flujo a mano con la fecha de ese día.
+
+Checked: cases and results in `workflows/tests/06-due-reminders.md`.
