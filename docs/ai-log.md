@@ -203,6 +203,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** Unit tests pass. The agent sent the payloads through the router on the team's n8n: payloads 1 to 4 gave four successful flow 01 executions and four emails that Manon confirmed arrived with the right content; payloads 5 and 6 (no email, email without `@`) gave successful executions and Manon confirmed the shop alerts; payload 8 (no `precio`) failed flow 01 and ran flow 08. Details in `workflows/tests/01-reservation-confirmation.md`. The agent cannot read inboxes.
 - **Remaining work at handoff:** opening the PR to `dev` with `Closes #1` and David's review.
 
+### AI-012 — Flow 90 Demo Data (#20)
+
+- **Date:** 2026-10-26 (Europe/Madrid).
+- **Related issue / PR:** [#20 — Flujo de prueba](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/20); PR not opened yet.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "I want HU-20 started, PR #37 is not merged yet"; `/opsx:apply add-demo-data-flow`; "Option 1, dry run first"; "yes"; "credentials attached"; `docker exec paso-firme-n8n-1 n8n execute --id <flow id>`; "I have received 7 emails, saved one as evidence"; "run it" (second run); "1.2 and 2.4, tick it as confirmed"; "2.1: confirmed"; "3, go for it".
+- **Accepted suggestions and reasons:** The scenarios, the duplicate filter, the deposit plan and the summary live in a tested Code node source (`workflows/code/90-build-scenarios.js`, 11 unit tests), so the flow only sends prices, deposits and the original date and never calculates `abonado`, `pendiente`, `fecha_limite` or `estado`. Two placeholder items (`nada`, `sinAbonos`) and two IF nodes keep the summary running on an empty app and on a second run. The committed file is the generated JSON, without credentials, the flow 08 ID or instance data.
+- **Rejected / deferred suggestions and reasons:** Running the flow in the editor was not done by the agent; the CLI run is not the same as pressing *Execute workflow*, so tasks 1.2, 2.1 and 2.4 rest on Manon's confirmation. The agent did not publish any flow and did not write any credential.
+- **Agent errors and corrections:** The first `n8n execute` failed at start-up because the CLI process collided with the running n8n on the task broker port; no data was created, and the retry used `N8N_RUNNERS_BROKER_PORT=5680` for that command only. A first read of the app used port 8000, which belongs to another stack on this machine; the app is on `TIENDA_PORT` (8001). The first draft of the test notes guessed the deposit list of reservation 29 and was corrected after reading it from the API.
+- **Verification and evidence:** Unit tests pass. First run: 5 created, 0 skipped, 2 deposits, ids 29 to 33; the app (API) showed `activo` 30,00 / 59,90, `liquidado`, `liquidado`, `activo` without email and `activo` with deadline 2026-10-16. Manon reported 7 emails (4 flow 01 confirmations, 1 flow 01 shop alert, 2 flow 02 messages) and saved one screenshot. Second run: 0 created, 5 skipped, 33 reservations still in the app. Details in `workflows/tests/90-demo-data.md`. The agent cannot read inboxes.
+- **Remaining work at handoff:** screenshot of the five demo reservations in the app screen (task 3.2), opening the PR to `dev` with `Closes #20`, David's review (task 3.3), and archiving the change after the merge.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
