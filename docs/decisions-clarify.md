@@ -209,3 +209,19 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 **Rejected:** a local uncommitted edit of the port mapping (easy to commit by mistake); a hard-coded address in the flow JSON (real data in Git).
 
 **Consequence:** a plain environment variable is readable by every workflow of that instance, so it must hold no secret. The shop address is not one.
+
+## Due date reminders (flow 06, HU-06)
+2026-10-26 (Medium level taken up after the Essential flows; board assigns #6 and #7 to Manon)
+
+**Decision:**
+- The flow runs every day at **09:00 Europe/Madrid** and can be run by hand for a chosen date.
+- A reservation is reminded when it is `activo` and its `fecha_limite` is **exactly** 7 days or exactly 1 day after the run date. No catch-up for a day when n8n was down.
+- Each reminder is sent **once**: a sent-record `avisos.csv` in the same kDrive folder as the daily-close history (columns `apartado_id;umbral;resultado;fecha_envio`, semicolons, one row per reservation and threshold). It is a separate file; `basedatos.csv` (HU-04) is never touched. David confirmed the folder and credential can be shared.
+- A reservation without a usable `email` alerts the shop once and is recorded as `sin_email`.
+- Emails go out directly from the flow (no shared notification sub-workflow), in Spanish, with the app's amounts as sent.
+
+**Why:** the app emits no event before a deadline, so the flow is time-driven. The README asks for "once" per reminder, which needs a record that survives restarts; kDrive is already set up for HU-04 and Marisa can open the file.
+
+**Rejected:** n8n static data (invisible, lost with n8n data); no record (a re-run sends twice); "7 days or fewer and not yet reminded" catch-up (changes what "7 days" means; revisit if missed runs become a problem); a shared notification sub-workflow (already deferred for flows 01 and 02).
+
+**Consequence:** if the email is accepted but `avisos.csv` cannot be saved, the next run would send it again; the save fails loudly so flow 08 alerts. This does not contradict the Essential target level: [Target level](#target-level) said to reassess Medium once the Essential flows pass their tests.
