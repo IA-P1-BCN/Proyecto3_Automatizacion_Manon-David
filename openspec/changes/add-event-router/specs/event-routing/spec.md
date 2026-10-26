@@ -14,7 +14,7 @@ The system SHALL receive all app events on one webhook endpoint that accepts POS
 - **THEN** the router accepts it and starts handling it
 
 ### Requirement: Events are routed by name
-The system SHALL send `apartado.creado` events only to the reservation-confirmation flow and `abono.registrado` events only to the deposit-receipt flow, passing the event's `datos` unchanged.
+The system SHALL send `apartado.creado` events only to the reservation-confirmation flow, `abono.registrado` events only to the deposit-receipt flow and `venta.registrada` events only to the large-sale-alert flow, passing the event's `datos` unchanged.
 
 #### Scenario: Reservation created
 - **WHEN** an `apartado.creado` event arrives
@@ -24,11 +24,15 @@ The system SHALL send `apartado.creado` events only to the reservation-confirmat
 - **WHEN** an `abono.registrado` event arrives
 - **THEN** only the deposit-receipt flow runs, and it receives the updated reservation and the deposit `importe` exactly as the app sent them
 
-### Requirement: Unhandled events are accepted silently
-The system SHALL accept events that have no handler yet (`venta.registrada`, `apartado.vencido`) and any unknown event name, without raising an error or an alert.
-
-#### Scenario: Sale event with no handler
+#### Scenario: Sale registered
 - **WHEN** a `venta.registrada` event arrives
+- **THEN** only the large-sale-alert flow runs, and it receives the sale exactly as the app sent it
+
+### Requirement: Unhandled events are accepted silently
+The system SHALL accept events that have no handler yet (`apartado.vencido`) and any unknown event name, without raising an error or an alert.
+
+#### Scenario: Expired reservation with no handler
+- **WHEN** an `apartado.vencido` event arrives
 - **THEN** the router finishes successfully, no message is sent and no error alert is raised
 
 #### Scenario: Unknown event name

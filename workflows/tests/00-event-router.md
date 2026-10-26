@@ -6,7 +6,7 @@ Send each payload as a `POST` to the router's webhook (`/webhook-test/tienda` wh
 |---|---|---|---|
 | 1 | `{"evento": "apartado.creado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 10.0, "pendiente": 79.9}}` | Flow 01 only, receives `evento` and `datos` unchanged | success |
 | 2 | `{"evento": "abono.registrado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 30.0, "pendiente": 59.9, "importe": 20.0}}` | Flow 02 only, receives `evento` and `datos` unchanged (including `importe`) | success |
-| 3 | `{"evento": "venta.registrada", "datos": {"id": 257, "fecha": "2026-10-20", "concepto": "Crema calzado", "importe": 4.5, "forma_pago": "efectivo"}}` | No handler yet: "unhandled event" output | success, no alert |
+| 3 | `{"evento": "venta.registrada", "datos": {"id": 257, "fecha": "2026-10-20", "concepto": "Crema calzado", "importe": 4.5, "forma_pago": "efectivo"}}` | Flow 04 only, receives `evento` and `datos` unchanged | success |
 | 4 | `{"evento": "apartado.vencido", "datos": {"apartado": {"id": 16, "cliente": "Paula Ramos", "estado": "vencido"}, "vale": {"id": 2, "codigo": "VALE-00016", "importe": 5.0}}}` | No handler yet: "unhandled event" output | success, no alert |
 | 5 | `{"evento": "cosa.rara", "datos": {}}` | "unhandled event" output | success, no alert |
 | 6 | `{"datos": {"id": 1}}` (no `evento`) | "missing event name" output, throws | error, flow 08 alert |
@@ -22,12 +22,17 @@ Run on 2026-10-23 in a clean throwaway n8n 2.44.5 container (not the team's inst
 |---|---|
 | 1 | router success; stub for flow 01 ran once and held the payload |
 | 2 | router success; stub for flow 02 ran once and held the payload |
-| 3, 4, 5 | router success; no stub ran |
+| 3 | at that time `venta.registrada` was still ignored, so no stub ran; since flow 04 it is routed to flow 04 (re-test pending, see below) |
+| 4, 5 | router success; no stub ran |
 | 6, 7 | router error; no stub ran |
 
 ### Run on the team's n8n (reported by Manon, 2026-10-23)
 
 With the stubs linked and everything published, the seven payloads and the real app's reservation and deposit events behaved as expected. Payloads 6 and 7 each failed the router and produced a flow 08 alert email (task 2.3 done, 2026-10-23). Still pending: the failing-handler tests.
+
+### Re-test after adding flow 04 (task 3.1 of `add-large-sale-alert`)
+
+`venta.registrada` now has its own output that calls flow 04. Pending on the team's n8n: after choosing flow 04 in **Call Large Sale Alert (flow 04)**, payload 3 must run flow 04 once with `evento` and `datos` unchanged (the sale of 4.5 € gives no email), payloads 1, 2 and 4 to 7 must behave as in the table above, and `cosa.rara` / `apartado.vencido` must still end silently.
 
 Not covered by the throwaway run: flow 08 attached to the router, a failing handler followed by another event (tasks 3.1 and 3.2), and the real app's events (covered by the team's run).
 
@@ -46,7 +51,7 @@ Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json; charset
 $body = '{"evento": "abono.registrado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 30.0, "pendiente": 59.9, "importe": 20.0}}'
 Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
 
-# 3 · venta.registrada
+# 3 · venta.registrada (reaches flow 04)
 Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "venta.registrada", "datos": {"id": 257, "fecha": "2026-10-20", "concepto": "Crema calzado", "importe": 4.5, "forma_pago": "efectivo"}}'
 
 # 4 · apartado.vencido
@@ -99,7 +104,7 @@ On 2026-10-23 the router was exported from the team's n8n with `n8n export:workf
 
 ## Setup after importing
 
-1. Import `workflows/tests/00-stub-reservation-confirmation.json` and `workflows/tests/00-stub-deposit-receipt.json` (placeholders until flows 01 and 02 exist), then `workflows/00-event-router.json`.
-2. In the router, open both *Call …* nodes and choose the sub-workflow in the **Workflow** field. IDs differ on every n8n instance, so the JSON leaves them empty.
+1. Import `workflows/tests/00-stub-reservation-confirmation.json` and `workflows/tests/00-stub-deposit-receipt.json` (placeholders until flows 01 and 02 exist; flow 04 is imported from `workflows/04-large-sale-alert.json`), then `workflows/00-event-router.json`.
+2. In the router, open the three *Call …* nodes (flows 01, 02 and 04) and choose the sub-workflow in the **Workflow** field. IDs differ on every n8n instance, so the JSON leaves them empty.
 3. Set *Settings → Error Workflow* of the router (and later of each handler) to `08 Error Workflow`.
 4. Publish the stubs, then the router. `N8N_WEBHOOK_URL` in `.env` must be `http://n8n:5678/webhook/tienda` for the real app.

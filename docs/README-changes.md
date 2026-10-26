@@ -1,6 +1,6 @@
 # README changes to apply
 
-`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow`, task 4.2 of `openspec/changes/add-event-router` and task 3.2 of `openspec/changes/add-deposit-receipt` and task 3.2 of `openspec/changes/add-reservation-confirmation`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
+`README.md` is the supplied assignment (Spanish), so it is not edited by the agents. These are the changes the team should apply when convenient. They cover tasks 5.1 and 5.2 of `openspec/changes/add-error-workflow`, task 4.2 of `openspec/changes/add-event-router` and task 3.2 of `openspec/changes/add-deposit-receipt` and task 3.2 of `openspec/changes/add-reservation-confirmation` and task 5.2 of `openspec/changes/add-large-sale-alert`, plus two corrections found while working on flow 08. Suggested README text is in Spanish.
 
 ## 1. Credentials and variables used by flow 08 (task 5.1)
 
@@ -90,7 +90,29 @@ Suggested text:
 
 Checked: payloads and results in `workflows/tests/01-reservation-confirmation.md`. Screenshots of the received emails: `docs/evidence/01-reservation-confirmation/`.
 
-## 7. Demo data, flow 90 (demo-data-flow task 3.2)
+## 7. Large sale alert, flow 04 (large-sale-alert task 5.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 04 reuses the SMTP credential and the two address variables of flows 08 and 02, and adds one variable:
+
+| Name | Type | Used for |
+|---|---|---|
+| `TIENDA_UMBRAL_VENTA_GRANDE` | environment variable in `.env` (passed to n8n by `docker-compose.yml`) | Amount in euros, with a dot decimal, above which Marisa gets a large-sale alert. The alert is sent only for sales strictly greater than it |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Large Sale Alert* node | Send the alert |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the alert (Marisa) |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of the alert |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 04 | Alert when the threshold is missing or invalid, when a sale arrives without `importe`, or when sending fails |
+
+Suggested text:
+
+> **Aviso de ventas grandes (flujo 04).** Cada vez que la app registra una venta directa, el router llama al flujo `04 Large Sale Alert`, que avisa a Marisa por correo (concepto, importe, forma de pago y fecha) cuando el importe es **mayor** que el umbral. Una venta igual al umbral no avisa. El umbral es la variable `TIENDA_UMBRAL_VENTA_GRANDE` del `.env` (en euros, con punto decimal, por ejemplo `150` o `99.99`; con coma no vale). Si está vacía o no es un número, el flujo falla y el flujo 08 avisa, en lugar de dejar de avisar sin que nadie lo note.
+>
+> **Cambiar el umbral.** Edita `TIENDA_UMBRAL_VENTA_GRANDE` en tu `.env` y ejecuta `docker compose up -d` para reiniciar n8n. Hace falta reiniciar porque n8n lee las variables de entorno solo al arrancar; no hay que tocar ningún flujo ni volver a importarlo.
+>
+> **Puesta en marcha.** Importa `workflows/04-large-sale-alert.json`, elige tu credencial SMTP en el nodo *Send Large Sale Alert*, pon *Settings → Error Workflow → `08 Error Workflow`*, publícalo, y en el router elige este flujo en el nodo *Call Large Sale Alert (flow 04)*. Publica el flujo 04 antes que el router. Si n8n está parado cuando se registra la venta, el aviso se pierde: la app no reintenta.
+
+Checked: payloads and results in `workflows/tests/04-large-sale-alert.md`.
+
+## 8. Demo data, flow 90 (demo-data-flow task 3.2)
 
 Add to the README's credentials/variables list (names only, never values). Flow 90 introduces nothing new: it reuses what flows 08, 00, 01 and 02 already need, plus the shared Header Auth credential.
 

@@ -1,0 +1,121 @@
+{
+  "name": "04 Large Sale Alert",
+  "nodes": [
+    {
+      "id": "b1a1c1d1-0401-4000-8000-000000000001",
+      "name": "When Called By Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0401-4000-8000-000000000002",
+      "name": "Parse And Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Flow 04 · Large Sale Alert — \"Parse And Format\" Code node.\n// Pasted as-is into the Code node (mode: Run Once for All Items); also loaded by the tests.\n// Validates the threshold and the sale, and formats the alert. The comparison itself is done by the IF node.\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2026-10-20\" -> \"20/10/2026\", without going through Date so no timezone can shift the day.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\n// Dot decimals only: \"150\" and \"99.99\" are valid; \"\", \"abc\", \"99,99\" and \"-5\" are not.\nfunction parseThreshold(rawThreshold) {\n  const text = String(rawThreshold ?? '').trim();\n  if (!/^\\d+(\\.\\d+)?$/.test(text)) {\n    throw new Error('TIENDA_UMBRAL_VENTA_GRANDE no está definida o no es un número válido (usa punto decimal, p. ej. 150)');\n  }\n  return Number(text);\n}\n\nfunction buildAlert(datos, rawThreshold) {\n  const umbral = parseThreshold(rawThreshold);\n  if (!datos || typeof datos !== 'object') throw new Error('El aviso venta.registrada llegó sin datos');\n  if (typeof datos.importe !== 'number' || !Number.isFinite(datos.importe)) {\n    throw new Error('El aviso venta.registrada llegó sin «importe» válido');\n  }\n\n  return {\n    importe: datos.importe,\n    umbral,\n    subject: `Venta grande: ${formatEuros(datos.importe)} · ${datos.concepto}`,\n    body: [\n      'Se ha registrado una venta por encima del umbral de aviso.',\n      '',\n      `Concepto:       ${datos.concepto}`,\n      `Importe:        ${formatEuros(datos.importe)}`,\n      `Forma de pago: ${datos.forma_pago}`,\n      `Fecha:          ${formatDate(datos.fecha)}`,\n    ].join('\\n'),\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { buildAlert };\n// Inside n8n there is no `module`; `$input` exists only there.\nif (typeof $input !== 'undefined') {\n  return [{ json: buildAlert($input.first().json.datos, $env.TIENDA_UMBRAL_VENTA_GRANDE) }];\n}\n"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0401-4000-8000-000000000003",
+      "name": "Is Sale Above Threshold?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "b1a1c1d1-0401-4000-8000-000000000021",
+              "leftValue": "={{ $json.importe }}",
+              "rightValue": "={{ $json.umbral }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1a1c1d1-0401-4000-8000-000000000004",
+      "name": "Send Large Sale Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        680,
+        -60
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "When Called By Router": {
+      "main": [
+        [
+          {
+            "node": "Parse And Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse And Format": {
+      "main": [
+        [
+          {
+            "node": "Is Sale Above Threshold?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Sale Above Threshold?": {
+      "main": [
+        [
+          {
+            "node": "Send Large Sale Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
