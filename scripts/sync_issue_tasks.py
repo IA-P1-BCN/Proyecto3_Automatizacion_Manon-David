@@ -19,6 +19,7 @@ ISSUES = {
     2: ('add-deposit-receipt', 'WORKTREE'),
     3: ('add-remote-deposits', 'origin/dev'),
     4: ('add-daily-close', 'origin/dev'),
+    20: ('add-demo-data-flow', 'WORKTREE'),
 }
 
 
