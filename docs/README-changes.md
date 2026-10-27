@@ -112,7 +112,25 @@ Suggested text:
 
 Checked: payloads and results in `workflows/tests/04-large-sale-alert.md`.
 
-## 8. Expired reservations, flow 06b (expired-reservations task 5.2)
+## 8. Demo data, flow 90 (demo-data-flow task 3.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 90 introduces nothing new: it reuses what flows 08, 00, 01 and 02 already need, plus the shared Header Auth credential.
+
+| Name | Type | Used for |
+|---|---|---|
+| Header Auth (`X-API-Key`) | n8n credential, chosen in the three HTTP nodes `List Reservations`, `Create Reservation` and `Register Deposit` | Call the app at `http://tienda:8000` |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Email of every demo customer that has one, so the demo emails reach the team inbox and no real customer |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 90 | Alert when the app rejects a request |
+
+Suggested text:
+
+> **Datos de demostración (flujo 90).** Para preparar una demo, ejecuta a mano `90 Demo Data` (*Execute workflow*; no se publica). Crea cinco apartados de clientes con el sufijo «(demo)» a través de la API de la app y registra sus abonos: uno activo con abono posterior, uno que se liquida con el último abono, uno pagado entero al crearlo, uno sin email y uno con el plazo ya vencido pero todavía `activo`. Los clientes con email usan la dirección de `TIENDA_EMAIL_AVISOS`, así que los correos de los flujos 01 y 02 llegan al buzón del equipo (unos siete) y nunca a una clienta real. Si lo ejecutas otra vez no duplica nada: solo crea los clientes de demostración que aún no existen. La app no tiene botón de borrar: para empezar de cero hay que reiniciar los datos con `docker compose down -v`.
+>
+> **Antes de ejecutarlo.** Importa `workflows/90-demo-data.json`, elige la credencial Header Auth en los tres nodos HTTP, pon *Settings → Error Workflow → `08 Error Workflow`* y, si quieres ver los correos, publica antes los flujos 01, 02 y el router.
+
+Checked: expected states, email count and PowerShell checks in `workflows/tests/90-demo-data.md`. Screenshots: `docs/evidence/90-demo-data/`.
+
+## 9. Expired reservations, flow 06b (expired-reservations task 5.2)
 
 Add to the README's credentials/variables list (names only, never values). Flow 06b reuses what flows 02, 04 and 06 already use and adds nothing new:
 
@@ -137,7 +155,7 @@ Suggested text:
 > **Puesta en marcha.** Importa `workflows/06b-expired-reservations.json`, elige la credencial Header Auth de la tienda en los nodos *Fetch Reservations* y *Expire Reservation* y tu credencial SMTP en los dos nodos de correo, pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo.
 
 Checked: logic by unit tests; payloads and results in `workflows/tests/06b-expired-reservations.md` (n8n runs pending).
-## 9. Due date reminders, flow 06 (due-reminders task 5.2)
+## 10. Due date reminders, flow 06 (due-reminders task 5.2)
 
 Add to the README's credentials/variables list (names only, never values). Flow 06 reuses what flows 05, 08 and 02 already need and adds no new variable:
 
@@ -163,7 +181,7 @@ Suggested text:
 
 Checked: cases and results in `workflows/tests/06-due-reminders.md`.
 
-## 10. Excel migration, flow 10 (excel-migration task 6.2)
+## 11. Excel migration, flow 10 (excel-migration task 6.2)
 
 Add to the README's credentials/variables list (names only, never values). Flow 10 reuses what flows 08, 00 and 06 already need and adds one n8n Data Table:
 

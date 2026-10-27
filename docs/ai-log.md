@@ -215,6 +215,18 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** 6 unit tests pass. Manon reported on the team's n8n, through the router webhook: sales of 189,50 € and 150,01 € each produced one alert email, a sale equal to or below the threshold produced none, a sale without `importe` or with `importe` as text failed flow 04 and flow 08 alerted, and an `abono.registrado` event did not run flow 04. Manon also confirmed the remaining checks of tasks 2.3, 3.1, 3.2, 4.2 and 4.3 as passed. Details in `workflows/tests/04-large-sale-alert.md`. The agent ran no n8n execution and cannot read inboxes.
 - **Remaining work at handoff:** the PR to `dev` with `Closes #9` and David's review (task 5.3). A clean `docker compose up -d` from an empty volume was not run, to keep Manon's flows; the committed flow JSONs are the generated files and contain no credentials, `localhost` or addresses.
 
+### AI-013 — Flow 90 Demo Data (#20)
+
+- **Date:** 2026-10-26 (Europe/Madrid).
+- **Related issue / PR:** [#20 — Flujo de prueba](https://github.com/IA-P1-BCN/Proyecto3_Automatizacion_Manon-David/issues/20); PR not opened yet.
+- **Tool and model:** Claude Code / Claude Sonnet 5.5 (Manon's agent).
+- **Prompt / request:** "I want HU-20 started, PR #37 is not merged yet"; `/opsx:apply add-demo-data-flow`; "Option 1, dry run first"; "yes"; "credentials attached"; `docker exec paso-firme-n8n-1 n8n execute --id <flow id>`; "I have received 7 emails, saved one as evidence"; "run it" (second run); "1.2 and 2.4, tick it as confirmed"; "2.1: confirmed"; "3, go for it".
+- **Accepted suggestions and reasons:** The scenarios, the duplicate filter, the deposit plan and the summary live in a tested Code node source (`workflows/code/90-build-scenarios.js`, 11 unit tests), so the flow only sends prices, deposits and the original date and never calculates `abonado`, `pendiente`, `fecha_limite` or `estado`. Two placeholder items (`nada`, `sinAbonos`) and two IF nodes keep the summary running on an empty app and on a second run. The committed file is the generated JSON, without credentials, the flow 08 ID or instance data.
+- **Rejected / deferred suggestions and reasons:** Running the flow in the editor was not done by the agent; the CLI run is not the same as pressing *Execute workflow*, so tasks 1.2, 2.1 and 2.4 rest on Manon's confirmation. The agent did not publish any flow and did not write any credential.
+- **Agent errors and corrections:** The first `n8n execute` failed at start-up because the CLI process collided with the running n8n on the task broker port; no data was created, and the retry used `N8N_RUNNERS_BROKER_PORT=5680` for that command only. A first read of the app used port 8000, which belongs to another stack on this machine; the app is on `TIENDA_PORT` (8001). The first draft of the test notes guessed the deposit list of reservation 29 and was corrected after reading it from the API.
+- **Verification and evidence:** Unit tests pass. First run: 5 created, 0 skipped, 2 deposits, ids 29 to 33; the app (API) showed `activo` 30,00 / 59,90, `liquidado`, `liquidado`, `activo` without email and `activo` with deadline 2026-10-16. Manon reported 7 emails (4 flow 01 confirmations, 1 flow 01 shop alert, 2 flow 02 messages) and saved 7 email screenshots plus 5 app-screen screenshots of the demo reservations (`docs/evidence/90-demo-data/`, renamed by the agent after reading them). Second run: 0 created, 5 skipped, 33 reservations still in the app. Details in `workflows/tests/90-demo-data.md`. The agent cannot read inboxes.
+- **Remaining work at handoff:** David's review of PR #38 (task 3.3) and archiving the change after the merge.
+
 ### AI-014 — Flow 06 Due Date Reminders (#6)
 
 - **Date:** 2026-10-26 (Europe/Madrid).
@@ -338,15 +350,27 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Automation:** Portable-kit readiness checker reports missing `.github/personal-github.json` on main. This repository instead has existing custom review/close workflows; do not install competing automation incidentally. Verify actual review transition after PR creation and report failures rather than claiming it occurred. Closure/Done remain future post-review integration checks.
 - **Evidence and scope:** All agreed minimum checks passed, 33 Node.js + 32 backend tests in the final preflight. Preserve tested canonical layout, safe gates, sanitized data, docs and explicit operational limits. Temporary tests are unpublished; `.env`, raw local exports, backups, decrypted credentials and actual mail headers stay out of Git. Human review task remains unchecked until observed.
 
+### AI-026 — Local conflict resolution for demo-data PR #38
+
+- **Date / issue / branch:** 2026-10-27; #20 — Flujo de prueba; `feat/20-demo-data-flow`, in an isolated worktree. HU-08 remains paused at the user's request.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`; Git, GitHub CLI, Node.js and Python.
+- **Request:** Investigate and resolve the three conflicts blocking PR #38 before starting HU-08. No commit, push, merge, workflow execution or remote status change was authorized.
+- **Verified state:** PR #38 is now open, reopened by David, unmerged and conflicting with `dev`; issue #20 remains closed/Done. Its workflow exists on the feature branch but not on `dev`. No formal PR reviews were returned.
+- **Resolution:** Merge current `origin/dev` into the existing feature branch without committing. Preserve both branches' README setup sections and AI-log entries; retain issue mappings for #20, #6 and #10. Renumber only the overlapping README section headings. Leave the demo workflow, generator, scenario logic and evidence unchanged.
+- **Verification:** All 193 JavaScript tests passed, including the 11 demo-data tests. Python syntax and issue mappings checked without running the issue-sync script. Demo JSON parses, remains inactive, contains no credential associations or pinned data, and is byte-for-byte identical to the PR version. No new n8n integration, financial write or email test is claimed.
+- **Publication authorization:** After the local resolution, David explicitly authorized commit and push to the existing PR branch, without merging. These operations are pending at the time of this entry; their observed result will be reported in the conversation.
+- **Remaining:** Recheck GitHub conflict status after publication. Human review and merge are separate pending actions. Issue/Project state was not changed.
+
 ### AI-027 — Resolve PR #47 against the tested HU-03 checklist
 
 - **Date / issue / branch:** 2026-10-27; #3 — HU-03 · Abonos por Bizum o transferencia sin apuntar nada a mano; `docs/3-drop-evidence-task-v2`, PR #47, in an isolated worktree.
 - **Tool and model:** OpenCode / `openai/gpt-6.1-sol`; Git, GitHub CLI and Python.
-- **Request / authorization:** David requested fixing PR #47 and explicitly authorized its commit. Push, PR merge and workflow execution were not authorized.
+- **Request / authorization:** David initially authorized the conflict-resolution commit, created as `f824967`, without push. He subsequently explicitly requested fixing and merging PR #47, authorizing the remaining resolution, push and merge. No workflow execution was authorized.
 - **Finding:** The PR's one-line results-location edit was based on an obsolete unchecked checklist, conflicting with the approved minimal tests already recorded in `dev` after HU-03 integration.
-- **Resolution:** Preserve the current task completion states and all distinctions between live-provider previews, actual writes, receipt integration and error tests. In task 4.1, name `workflows/tests/03-remote-deposits.md` as the results-table document and retain the supporting `groq-live-results.json` reference. No existing evidence or workflow is removed or modified.
-- **Verification:** Check the resolved checklist against `origin/dev`: only task 4.1's documentation references may differ; all task states must match. Verify referenced files exist, no conflict markers remain and the staged diff has no whitespace errors. No new integration or financial test is claimed.
-- **Remaining:** Authorized commit, then request push permission. GitHub will retain the conflict until the branch update is pushed. Human review and PR merge remain separate actions.
+- **Resolution:** Preserve the current task completion states and all distinctions between live-provider previews, actual writes, receipt integration and error tests. In task 4.1, name `workflows/tests/03-remote-deposits.md` as the results-table document and retain the supporting `groq-live-results.json` reference. No existing evidence or workflow is removed or modified. After PR #38 was merged by David, preserve its AI-026 entry when updating this branch from `dev`.
+- **Verification:** Checklist comparison passed: only task 4.1's documentation references differ; all 23 task states match. Both referenced files exist. Check the final staged diff for whitespace errors and conflict markers before publication. No new integration or financial test is claimed.
+- **Review enforcement:** GitHub returned no formal reviews for #47 and reports `dev` as not branch-protected. Do not claim formal approval or bypass protection; this documentation-only merge was explicitly requested by David.
+- **Remaining:** Commit the update, push and perform the user-requested merge subject to GitHub checks; then verify remote state. These actions are pending at the time of this entry. No issue/Project state change is requested.
 
 ## Entry template
 
