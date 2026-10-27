@@ -31,7 +31,7 @@
 
 - [ ] 5.1 Export `workflows/06-due-reminders.json` and verify it contains no credentials, `localhost`, real addresses or kDrive IDs.
 - [x] 5.2 Document in `docs/README-changes.md` the credentials and variables used (names only), the `avisos.csv` file and columns, the 09:00 schedule, the manual run with a date, and that a day with n8n down is not caught up; verify the text matches the tested flow.
-- [ ] 5.3 Save screenshots of the received emails and of `avisos.csv` in `docs/evidence/06-due-reminders/` and add the entry to `docs/ai-log.md`; verify the entry says no data left n8n except the app and kDrive calls.
+- [ ] 5.3 Document the test results in `workflows/tests/` and add the entry to `docs/ai-log.md`; verify the entry says no data left n8n except the app and kDrive calls.
 - [ ] 5.4 Sync the issue with `python scripts/sync_issue_tasks.py 6`, open the PR to `dev` with `Closes #6` and verify the other teammate reviewed it.
 
 ## Workflow follow-up
