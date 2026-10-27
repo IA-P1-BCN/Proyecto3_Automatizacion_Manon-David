@@ -15,6 +15,22 @@ writes; see [payment idempotency](docs/payment-idempotency.md). The approval for
 was explicitly deferred: Marisa resolves doubtful notices manually. Local/mocked
 checks are not proof of the final live integration; see [evidence](docs/evidence/03-remote-deposits/README.md).
 
+## HU-08 implementation setup
+
+Import `workflows/07-monthly-report.json` as an inactive draft and follow the
+[monthly report setup](docs/monthly-report-setup.md). It uses the existing shop
+Header Auth (`X-API-Key`), Infomaniak SMTP, `TIENDA_EMAIL_FROM`,
+`TIENDA_EMAIL_AVISOS` and local Error Workflow selection. Manual email/PDF
+options default off. A guard prevents the scheduled entry from sending during
+manual editor/CLI tests.
+
+The report covers the previous calendar month, distinguishes current active debt
+from historical month-end debt, and documents how settlement/expiry dates are
+attributed. Optional local PDF conversion uses
+`docker-compose.monthly-pdf.yml`; no AI provider or PDF SaaS is required.
+See [actual checks and limitations](workflows/tests/07-monthly-report.md).
+Importing/testing does not authorize publishing or scheduling unattended runs.
+
 <img width="11520" height="3456" alt="n8n" src="https://github.com/user-attachments/assets/f8bdfbe6-0400-4f8e-a011-efb25c188db4" />
 
 ## 📋 Planteamiento

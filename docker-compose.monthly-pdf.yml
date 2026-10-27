@@ -1,0 +1,28 @@
+# Optional local converter for HU-08. Start only monthly-pdf, not the other services.
+# docker compose -f docker-compose.yml -f docker-compose.monthly-pdf.yml up -d --no-deps monthly-pdf
+services:
+  monthly-pdf:
+    image: gotenberg/gotenberg:8.39.0-chromium
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-disable-download-from=true
+      - --api-body-limit=2MB
+      - --api-timeout=30s
+      - --chromium-disable-javascript=true
+      - --chromium-deny-private-ips=true
+      - --chromium-deny-public-ips=true
+      - --chromium-max-concurrency=1
+      - --chromium-max-queue-size=2
+      - --chromium-idle-shutdown-timeout=60s
+      - --pdfengines-disable-routes=true
+      - --webhook-disable=true
+      - --log-level=error
+    environment:
+      - TZ=Europe/Madrid
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.0
+    shm_size: 128m
+    # No host ports, credentials or business-data volumes.
