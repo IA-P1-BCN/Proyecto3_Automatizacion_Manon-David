@@ -20,6 +20,7 @@ ISSUES = {
     3: ('add-remote-deposits', 'origin/dev'),
     4: ('add-daily-close', 'origin/dev'),
     6: ('add-due-reminders', 'WORKTREE'),
+    10: ('add-excel-migration', 'WORKTREE'),
 }
 
 
