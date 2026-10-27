@@ -192,6 +192,7 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 | #20 Flujo de prueba | demo-data flow | Manon | `feat/20-demo-data-flow` |
 | #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
 | #32 Event router (single webhook, routes app events to flows 01 and 02) | `add-event-router` | Manon | `feat/32-event-router` |
+| #7 HU-07 · Apartados vencidos con su vale | 06b · `add-expired-reservations` | Manon | `feat/7-expired-reservations` |
 
 **Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
 
@@ -209,3 +210,107 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 **Rejected:** a local uncommitted edit of the port mapping (easy to commit by mistake); a hard-coded address in the flow JSON (real data in Git).
 
 **Consequence:** a plain environment variable is readable by every workflow of that instance, so it must hold no secret. The shop address is not one.
+
+## Expired reservations and vouchers (flow 06b, HU-07)
+2026-10-26 (Medium level; board assigns #6 and #7 to Manon)
+
+**Decision:**
+- Own workflow `06b Expired Reservations`, separate from flow 06 (reminders), run every day at **09:05 Europe/Madrid** and by hand for a chosen date.
+- A reservation is expired when it is `activo` and its `fecha_limite` is **strictly before** the run date (the deadline day itself is still valid, as in the app). The flow calls `POST /api/apartados/{id}/vencer`; the app creates the voucher.
+- The customer gets one Spanish email with the voucher `codigo` and `importe` from the app's response, and a note that the voucher is store credit, never cash. Marisa gets **one summary per run**: the shoes that go back on sale and the customers she must tell by hand (no usable `email`, or the email bounced).
+- No sent-record file: once expired a reservation is `vencido` and no longer listed, so a re-run does nothing. Each expiry has its own error output; the run fails at the end if any expiry or email failed, so flow 08 alerts.
+- The router keeps ignoring `apartado.vencido`, so the voucher email is sent only by this flow.
+
+**Why:** the app never closes a late reservation by itself, and the README asks for expiry by API, a voucher message and a list for Marisa. Expiry is a one-way state change, so the app itself gives idempotency.
+
+**Rejected:** doing it inside flow 06 (a failure expiring one reservation could block reminders); handling `apartado.vencido` in the router (loses the one summary per run; open question if Marisa expires by hand); a catch-up rule (the selection already covers every reservation before today, so the next run recovers a missed day).
+
+**Consequence:** a reservation expired by hand from the app screen sends no voucher email. If the expiry succeeds but the customer email fails, there is no automatic retry: the voucher code is in Marisa's summary and in the alert. The app checks its own real date, so a manual run with a past date can only narrow what is expired.
+## Due date reminders (flow 06, HU-06)
+2026-10-26 (Medium level taken up after the Essential flows; board assigns #6 and #7 to Manon)
+
+**Decision:**
+- The flow runs every day at **09:00 Europe/Madrid** and can be run by hand for a chosen date.
+- A reservation is reminded when it is `activo` and its `fecha_limite` is **exactly** 7 days or exactly 1 day after the run date. No catch-up for a day when n8n was down.
+- Each reminder is sent **once**: a sent-record `avisos.csv` in the same kDrive folder as the daily-close history (columns `apartado_id;umbral;resultado;fecha_envio`, semicolons, one row per reservation and threshold). It is a separate file; `basedatos.csv` (HU-04) is never touched. David confirmed the folder and credential can be shared.
+- A reservation without a usable `email` alerts the shop once and is recorded as `sin_email`.
+- Emails go out directly from the flow (no shared notification sub-workflow), in Spanish, with the app's amounts as sent.
+
+**Why:** the app emits no event before a deadline, so the flow is time-driven. The README asks for "once" per reminder, which needs a record that survives restarts; kDrive is already set up for HU-04 and Marisa can open the file.
+
+**Rejected:** n8n static data (invisible, lost with n8n data); no record (a re-run sends twice); "7 days or fewer and not yet reminded" catch-up (changes what "7 days" means; revisit if missed runs become a problem); a shared notification sub-workflow (already deferred for flows 01 and 02).
+
+**Consequence:** if the email is accepted but `avisos.csv` cannot be saved, the next run would send it again; the save fails loudly so flow 08 alerts. This does not contradict the Essential target level: [Target level](#target-level) said to reassess Medium once the Essential flows pass their tests.
+
+## Excel migration: idempotency (HU-10)
+2026-10-26
+
+**Decision:** the migration finds out whether a row is already loaded by **querying the app itself**, with no import register. Before each create it looks for the same natural key and skips if found: apartado = `cliente` + `producto` + `fecha` + `precio`; abono = apartado + `fecha` + `importe`; venta = `fecha` + `concepto` + `importe`. When identical rows legitimately repeat on the same day, it compares **counts** (CSV occurrences vs. rows already in the app) and only creates the difference.
+
+**Why:** the API has no idempotency key and apartados have no notes field to carry a marker. The app is the single source of truth (constitution principle 1), so a second register could drift from it, and a lookup keeps working if any register or n8n data is wiped.
+
+**Rejected:** import register in Google Sheets (second source of truth, a deleted sheet means duplicates); n8n data table (invisible to Marisa, lost if n8n data is wiped).
+
+**Consequence:** the app's `fecha_limite` is `fecha` + 90 days, so a re-run is only safe while the lookup can see the first run's rows (the app has no delete endpoint, which fits).
+
+## Excel migration: webhook side effects (HU-10)
+2026-10-26
+
+**Decision:** the app sends a webhook for every apartado, abono and venta created through the API, and cannot be told not to. So the migration flow switches a **"migration running" flag on** at the start and **off** at the end, and also in its error branch. While the flag is on, the event router (flow 00) drops every event without calling flows 01/02. Marisa runs the migration once with the shop closed, so no real event is lost in that window. The flag lives in n8n (workflow static data or a data table; the spec picks one).
+
+**Why:** the CSVs have no `email`, so each historical row would trigger a "could not send" alert to Marisa (about 12). Skipping by old `fecha` is not safe: in `abono.registrado` the payload's `fecha` is the **apartado's** creation date, so a genuine new deposit on an older apartado would be dropped.
+
+**Rejected:** skip by old `fecha` (drops genuine deposits, see above); unsetting `N8N_WEBHOOK_URL` during the run (manual, and a forgotten restore silently kills all notices); letting the events through (about 12 noise alerts).
+
+**Consequence:** flow 00 (Manon, already merged) gets a small change; it needs its own test (flag on → event ignored, flag off → routed as today). The flag must be reset even if the migration fails, and the Error Workflow alert should say when it was left on.
+
+## Excel migration: report channel (HU-10)
+2026-10-26
+
+**Decision:** one **Spanish email** per run to Marisa (`TIENDA_EMAIL_AVISOS`, same SMTP credential as the other notices) with the result in the body: how many rows were loaded, how many skipped as already loaded, and a table of the rows held back with their reason. Re-running resends it, which also shows what is still pending.
+
+**Why:** email is already the channel for Marisa ([decision](#notification-channel)); no new credential or variable.
+
+**Rejected:** CSV attachment (extra binary step and a re-feed path the story doesn't ask for); Google Sheet (second place to look, new sheet ID variable).
+
+## Excel migration: doubtful rows (HU-10)
+2026-10-26
+
+**Decision:** a row is **held back and reported, never loaded**, when: the initial abono is under €5 (Lucía Gómez, €4); an abono exceeds the pending balance; `fecha`, `importe` or `cliente` is missing or unparseable; or it is a later abono of an apartado that was itself held back (Lucía's €41). **Cleaning is not doubt:** name casing (`carmen ruiz`), 2-digit years (`7/9/26`), `15€`, phone spacing and a missing phone are fixed silently. Lines in the sales file that repeat an apartado deposit ("… abono inicial apartado", "Abono Ana Torres …", "… (apartado)") are skipped as already counted, not loaded as ventas and not reported as doubtful. The "TOTAL SEPTIEMBRE (a mano)" line is ignored.
+
+**Why:** the rules (min €5, no overpaying, 90-day deadline) belong to the app (constitution principle 4); the flow only decides what to do with a row it cannot load. The old Excel counted initial deposits as sales, but in the app they are abonos ([ontology](../specs/ontologia.md)). Note the deadline is `fecha` + 90 days: every CSV date (02/09 to 06/10) is inside it today (2026-10-26), so no row is held for being expired, but the flow must check it for other data.
+
+**Rejected:** also holding same-customer-different-phone rows (more review for Marisa on a small sample); sending everything and reporting only the app's 422s (relies on the app's rejection against the story's wording).
+
+**Resolved below:** `forma_pago` for apartado rows.
+
+## Excel migration: payment method (HU-10)
+2026-10-26
+
+**Decision:** the apartados CSV has no `forma_pago`. For each deposit the flow uses the `forma_pago` of a sales-file line with the same `fecha` and `importe` (the file shows 3: efectivo, efectivo, bizum); with no match it sends `efectivo`. The report states which deposits got the default so Marisa can correct them.
+
+**Why:** uses the only real evidence we have without holding most rows, and the default is the in-shop norm.
+
+**Rejected:** always `efectivo` (ignores the visible Bizum deposit and skews the splits); holding rows with no match (holds most of the 12).
+
+## Excel migration: owner and timing (HU-10)
+2026-10-27 (supersedes the "after Essential" version of 2026-10-26)
+
+**Decision:** **Manon** owns HU-10 (issue #10, OpenSpec change `add-excel-migration`, branch `feat/10-excel-migration` from `dev`) and builds it **now**, without waiting for the Essential evidence and the remaining open stories (HU-03, HU-07, HU-08). The small migration-flag change to flow 00 is part of the same change and PR.
+
+**Why:** flows 01, 02, 04, 05, 06, 08 and the router are merged in `dev`, and HU-10 depends on none of the open stories. Medium has already been taken up ([Due date reminders](#due-date-reminders-flow-06-hu-06)). The branch starts from the current `dev`, so the flow 00 change builds on what is merged.
+
+**Rejected:** waiting for every Essential item (HU-03 and the evidence are David's and do not block this); David builds it (flow 00 is Manon's).
+
+**Consequence:** add #10 to the owner table in [Branching model and issues per flow](#branching-model-and-issues-per-flow); issue #10 is already assigned to Manon. Rebase on `dev` before the PR in case HU-03 or HU-07 touch flow 00.
+
+## Excel migration: how the CSV files arrive (HU-10)
+2026-10-27
+
+**Decision:** the migration flow starts from an n8n **Form Trigger with two file uploads** (apartados CSV and sales CSV); Extract From File parses them. `data/excel_actual_*.csv` are the files used in tests. No change to `docker-compose.yml`.
+
+**Why:** n8n runs in Docker with no access to the repo's `data/` folder, and n8n 2 restricts disk nodes. A form needs no volume or file-access setting, works on every machine, and lets Marisa re-run it with a corrected export.
+
+**Rejected:** mounting `data/` read-only into the n8n container (compose change for everyone, allow-list env vars, path differs per OS); uploading the CSVs to kDrive first (extra manual step and a dependency on the shared HU-04 folder for a one-off).
+
+**Also decided while writing the specs (to confirm in review):** (1) a sales line is a deposit repeat only if its concept mentions `abono` or `apartado` *and* a deposit has the same `fecha` and `importe`; a deposit-looking line with no match is held for Marisa; (2) a later row with a different `precio` than the first of its reservation is held; (3) the app's `422` is a safety net: it holds the row with the app's message; (4) the migration flag expires after 30 minutes so a crashed run cannot silence the shop forever.

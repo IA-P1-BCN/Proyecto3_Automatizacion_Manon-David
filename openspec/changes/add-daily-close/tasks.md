@@ -34,7 +34,7 @@
 - [x] 5.1 Generate the inactive credential-free `workflows/05-daily-close.json` and verify import in an isolated disposable n8n container, not the user's instance.
 - [ ] 5.2 Associate local credentials and flow 08 as Error Workflow; review/export the locally tested configuration without secrets or local references.
 - [x] 5.3 Document SMTP, X-API-Key, kDrive token/IDs, CSV recovery and late-movement boundaries in `docs/daily-close-setup.md` without rewriting the supplied README assignment.
-- [ ] 5.4 Save safe evidence under `docs/evidence/05-daily-close/`, complete the activity log, obtain commit/push/PR permission and request teammate review. Local implementation is not remote acceptance.
+- [ ] 5.4 Document the test results in `workflows/tests/`, complete the activity log, obtain commit/push/PR permission and request teammate review. Local implementation is not remote acceptance.
 
 ## Workflow follow-up
 

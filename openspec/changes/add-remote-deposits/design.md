@@ -2,37 +2,104 @@
 
 ## Context
 
-Bank notices arrive in the shop Infomaniak inbox in two layouts (Bizum: `Importe:`, `Ordenante:`, `Concepto:`; transfer: dotted `Ordenante ........`). Decimals use a comma and amounts end in `EUR`. The app has no customer table; reservation names are short ("Carmen Ruiz") while payers appear with full names. The app validates every deposit and answers 422 with a readable `detail`. It announces each registered deposit with `abono.registrado`, which feeds flow 02. See proposal.md and `specs/remote-deposit-registration/spec.md`.
+Issue #3 — HU-03 · Abonos por Bizum o transferencia sin apuntar nada a mano.
+The user approved a two-hour timebox and explicitly deferred automated approval
+forms and new automated mailbox tooling. They subsequently authorized a small
+manual synthetic-input branch using existing fixtures, not an email test runner.
+Doubtful payments are emailed to Marisa
+for manual resolution. The authorized backend exception is limited to safe
+payment registration and content-duplicate protection. See proposal and specs.
 
 ## Goals / Non-Goals
 
-**Goals:** correct automatic registration for clear payments; a precise question to Marisa for everything else; no duplicate deposits.
+**Goals:** an importable complete essential workflow with guarded registration,
+manual-review notices, isolated minimum checks and honest evidence boundaries.
 
-**Non-Goals:** receiving Marisa's reply and acting on it (she registers the payment in the app herself); fuzzy matching; sending customer messages; handling several bank formats beyond the sample layouts.
+**Non-Goals:** approval form, reading email replies, automatic reconciliation of
+manual app entries, universal bank formats, customer messaging from this flow,
+guaranteed event delivery or unattended production readiness.
 
 ## Decisions
 
-1. **Pipeline:** Email Trigger (IMAP) → mark as processed → AI extraction → validation Code node → fetch active reservations → matching Code node → branch (register / ask Marisa) → on 422, ask Marisa. *Alternative:* none needed; the IMAP trigger fits the team's Infomaniak mailbox, which also sends through SMTP.
+1. **IMAP and controlled test scope.** Resolved format avoids the observed Simple
+   encoding corruption. Read UNSEEN and mark received notices read to keep guided
+   tests manageable. This is not duplicate protection. Retain the tested sender
+   and TEST HU03 subject filter; publication and any real-bank sender/authentication
+   policy remain separate authorized work. Configured senders are placeholders.
 
-2. **Mark-as-processed first.** The email is labelled or marked read before any registration. If something fails afterwards, the error workflow alerts and the team registers by hand; a lost registration is loud, a duplicated deposit would be silent. *Alternative:* mark after registering; rejected because a failure between the two steps reprocesses the email and double-registers.
+2. **Data and model.** Send only subject/body to Groq with extraction-only,
+   untrusted-input instructions and a strict four-field nullable schema. The
+   candidate `openai/gpt-oss-20b` extracted Carmen and classified advertising in
+   user-reported editor tests of the previous extraction draft. This does not
+   prove all nine actual-model cases. Validate labelled amount/payer/concept,
+   precision, type and complete model response before matching. Technical failures
+   stop; semantic doubt routes to Marisa.
 
-3. **AI returns a small JSON** (`ordenante`, `importe`, `concepto`, `tipo`) via a prompt that forbids anything else. The validation node parses amounts such as `10,00 EUR`, rejects non-numeric or non-positive values, and checks the amount text occurs in the email (guards against invented figures).
+3. **Identity.** Two built-in Crypto SHA256 nodes produce an account-scoped
+   Message-ID key and a separate subject/body fingerprint. Account scope must be
+   stable. The adapter does not invent bank references or identify payments from
+   amount alone. The standalone identity helper remains supporting test material;
+   the workflow uses Crypto nodes rather than requiring crypto in Code sandboxes.
 
-4. **Matching lives in one Code node** with fixed order: number in concept → contained-name match → abbreviated-payer-plus-product match. Candidates come from `GET /api/apartados?estado=activo` (all pages). Exactly one candidate registers; otherwise ask. Names are normalised (lower case, accents removed, spaces collapsed). *Alternative:* similarity scoring; rejected (risk of silent mis-assignment).
+4. **Matching.** Read all reservations without pagination and check X-Total-Count
+   when present. Explicit apartado reference takes priority but an incompatible
+   payer requires review. Otherwise use normalized contained full-name tokens;
+   abbreviated first name and surname initial additionally require product
+   confirmation. A small explicit singular/plural dictionary supports fixture
+   product names, not fuzzy scoring. Multiple matching reservations, including
+   final/overdue ones, require review: eligibility never manufactures identity.
+   Balance, state and deadline come from the API. Overpayment and overdue cases
+   route to review; refresh selected detail immediately before writing. The API
+   validates again atomically. No reassigning explicit-reference overpayments.
 
-5. **Registration through the API only** (`POST /api/apartados/{id}/abonos`, method `bizum`) with the HTTP node's "continue on error" output so a 422 becomes a message to Marisa instead of a failure. The flow does not check pending amount or deadline itself.
+5. **Application retry safety.** Optional Idempotency-Key persists request hash and
+   original response in the payment transaction. Replay returns that snapshot
+   without another event; different inputs return 409. Optional
+   Payment-Notice-Fingerprint stores the account-scoped content digest with a
+   unique index: identical content under another key returns 409 for review, not
+   silent suppression. Changed content under one key also conflicts. Both headers
+   are sent by HU-03. An OpenAPI capability check blocks registration if the
+   running app does not expose both headers. Rebuild is required; the agent does
+   not mutate the live database. Additive schema initialization preserves records.
 
-6. **Alerts to Marisa are one email template with a reason field**, in Spanish: payer, amount, concept, type (Bizum/transfer), reason and candidate reservations if any.
+6. **No blind financial retries.** No automatic POST retry. 404/409/422 route to
+   review. Network/other failures are uncertain: try to notify Marisa, instruct her
+   to inspect before manual entry, and fail for HU-05. A retry must retain the same
+   message, key, content and POST data. A final-state reservation may instead go
+   to manual review on replay; that is safe and is not proof of another payment.
 
-7. **Model:** a Groq model chosen by testing the sample emails; the choice is logged in `docs/ai-log.md`.
+7. **Manual review.** Spanish SMTP notice includes payer, amount, real payment
+   type, reason and up to 20 candidate contacts. No customer receives this notice.
+   Missing concept preserves extracted payer/amount for candidate review. No
+   approval link or interpretation of replies exists. After manual registration,
+   the notice must not be automatically reprocessed: manual UI entries do not
+   share its key. That limitation is explicit, not a false exactly-once claim.
 
-8. **Bank-sender filter as configuration**, so the flow only looks at emails from the bank and not at its own sent mail or customer replies.
+8. **Gates and errors.** Export inactive and credential-free, Groq node disabled;
+   external AI, financial writes and shop notices each default false. Associate
+   IMAP, Groq, shop Header Auth and SMTP locally, and select local 08 Error Workflow
+   in settings. No portable error-workflow ID can be assumed. HTTP read failures
+   stop safely. Registration success relies on the app event for HU-02 and never
+   sends another receipt itself. Original personal export is left untouched.
 
 ## Risks / Trade-offs
 
-- **[Free model is slow or wrong]** → Validation and the "ask Marisa" path make a bad extraction harmless; test on all nine samples and compare at least two models if results are poor.
-- **[Name-containment false match]** A stored name like "Ana Torres" could be contained in the payer name of a different person. → Exactly-one rule plus the ask path; the sample data has no such clash, and ambiguity falls to Marisa.
-- **[Mark-first loses a payment on failure]** → Accepted; the error alert tells the team an email needs manual handling.
-- **[Polling delay]** The flow reacts at the polling interval, not instantly. → Acceptable for payments; set the interval to about a minute.
-- **[Attempted payment past 23:55]** It lands in the next day's close. → Documented in the daily-close change.
-- **[Reservations list grows]** Fetching all active reservations each time is fine at shop scale.
+- **Different genuine payments with identical text:** conservative 409/manual
+  review. A content hash does not establish banking identity.
+- **Reworded duplicate notices with different IDs:** not detected universally;
+  verified bank transaction references would be needed for stronger identity.
+- **Lost receipt event after commit:** existing best-effort webhook still lacks
+  an outbox; idempotent replay deliberately does not resend events.
+- **Mark-read followed by failure:** HU-05 and saved execution/manual review are
+  required. No durable case/approval queue was delivered in the cut scope.
+- **Repeated review notices:** possible on manual reprocessing; no one-time SMTP
+  guarantee is claimed.
+
+## Migration Plan
+
+Review/rebuild only the shop service to install authorized backend changes; never
+reset volumes. Import the generated workflow as a draft, reassociate credentials,
+choose local Error Workflow, configure controlled addresses and retain false
+write/notice gates until the intended test effects are approved. Verify first in
+preview, then a controlled eligible payment, rejection and replay. Roll back by
+disabling the workflow; do not delete payment records or deduplication history.

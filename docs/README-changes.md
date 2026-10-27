@@ -129,3 +129,81 @@ Suggested text:
 > **Antes de ejecutarlo.** Importa `workflows/90-demo-data.json`, elige la credencial Header Auth en los tres nodos HTTP, pon *Settings → Error Workflow → `08 Error Workflow`* y, si quieres ver los correos, publica antes los flujos 01, 02 y el router.
 
 Checked: expected states, email count and PowerShell checks in `workflows/tests/90-demo-data.md`. Screenshots: `docs/evidence/90-demo-data/`.
+
+## 9. Expired reservations, flow 06b (expired-reservations task 5.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 06b reuses what flows 02, 04 and 06 already use and adds nothing new:
+
+| Name | Type | Used for |
+|---|---|---|
+| shop Header Auth | n8n credential, chosen in *Fetch Reservations* and *Expire Reservation* | Read the active reservations and expire the late ones |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in *Send Customer Email* and *Send Shop Summary* | Voucher email to the customer and the summary to Marisa |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the summary (Marisa) |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of both emails |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 06b | Alert when the app is unreachable, an expiry is refused, or an email fails |
+
+No kDrive file: unlike flow 06, nothing is recorded, because an expired reservation is no longer listed as `activo`.
+
+Suggested text:
+
+> **Apartados vencidos (flujo 06b).** Cada día a las 09:05 (hora de Madrid) el flujo `06b Expired Reservations` busca los apartados `activo` cuya fecha límite ya pasó (el mismo día de la fecha límite todavía vale) y los vence con `POST /api/apartados/{id}/vencer`; la app crea el vale. Cada cliente recibe un correo con el código y el importe del vale, tal como los devuelve la app, y la aclaración de que el vale no se devuelve en dinero. Marisa recibe **un único resumen** con los zapatos que vuelven a la venta y, aparte, los clientes a los que hay que avisar a mano (sin email válido o con el correo rechazado), con su código de vale. Si algún vencimiento o correo falla, el flujo termina en error al final y el flujo 08 avisa; el resto de apartados se procesa igualmente.
+>
+> **Ejecución manual.** Con *Manual Run* y el campo `fecha` de *Choose Date* se simula otro día. La app usa su propia fecha real, así que una fecha anterior solo puede vencer menos apartados, nunca más.
+>
+> **Límites.** Si n8n está parado a las 09:05, no se pierde nada: la siguiente ejecución vence todo lo que siga fuera de plazo. Un apartado vencido a mano desde la pantalla de la app no genera correo de vale desde este flujo (el router sigue ignorando `apartado.vencido`). Si el vencimiento se hace y el correo al cliente falla, no se reenvía solo: Marisa tiene el código en el resumen.
+>
+> **Puesta en marcha.** Importa `workflows/06b-expired-reservations.json`, elige la credencial Header Auth de la tienda en los nodos *Fetch Reservations* y *Expire Reservation* y tu credencial SMTP en los dos nodos de correo, pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo.
+
+Checked: logic by unit tests; payloads and results in `workflows/tests/06b-expired-reservations.md` (n8n runs pending).
+## 10. Due date reminders, flow 06 (due-reminders task 5.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 06 reuses what flows 05, 08 and 02 already need and adds no new variable:
+
+| Name | Type | Used for |
+|---|---|---|
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in the *Fetch Reservations* node | Read the active reservations from the app |
+| kDrive Header Auth (the one of flow 05) | n8n credential, chosen in *List Records Folder*, *Download Records* and *Save Records* | Read and write `avisos.csv` |
+| `KDRIVE_DRIVE_ID`, `KDRIVE_DIRECTORY_ID` | environment variables in `.env` (passed to n8n by `docker-compose.yml`) | Drive and folder that hold `avisos.csv`, next to `basedatos.csv` |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Reminder* node | Send the reminders and the shop alerts |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the "no valid email" alerts (Marisa) |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of every email |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 06 | Alert when the app, kDrive or the email service fails, or when `avisos.csv` has the wrong columns |
+
+Suggested text:
+
+> **Recordatorios de vencimiento (flujo 06).** Cada mañana a las 09:00 (hora de Madrid) el flujo `06 Due Date Reminders` consulta a la app los apartados `activo` y avisa por correo a los clientes cuyo plazo vence **dentro de 7 días** y **dentro de 1 día**. El mensaje lleva el modelo, la talla, lo que falta por pagar, lo ya abonado y la fecha límite, tal como los da la app. Cada cliente recibe cada aviso **una sola vez**: el flujo apunta cada envío en el fichero `avisos.csv` de kDrive (`apartado_id;umbral;resultado;fecha_envio`), junto a `basedatos.csv`. Si el apartado no tiene correo válido, el aviso va a la tienda y se apunta como `sin_email`.
+>
+> **Ejecutarlo a mano para otra fecha.** Abre *Choose Date*, pon en `fecha` el día que quieres simular (`AAAA-MM-DD`) y ejecuta desde *Manual Run*. Repetir la misma fecha no vuelve a enviar nada.
+>
+> **Si algo falla.** Si el envío de un correo falla, los que sí salieron quedan apuntados, el flujo falla y el flujo 08 avisa; al repetir, solo se reintentan los que faltan. Si el correo salió pero no se pudo guardar `avisos.csv`, el flujo falla y avisa: revisa el fichero antes de la próxima mañana para no repetir el aviso.
+>
+> **Puesta en marcha.** Importa `workflows/06-due-reminders.json`, elige las credenciales (clave de la tienda, kDrive y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo. Si n8n está parado a las 09:00, ese día no se envían los recordatorios y no se recuperan solos: ejecuta el flujo a mano con la fecha de ese día.
+
+Checked: cases and results in `workflows/tests/06-due-reminders.md`.
+
+## 11. Excel migration, flow 10 (excel-migration task 6.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 10 reuses what flows 08, 00 and 06 already need and adds one n8n Data Table:
+
+| Name | Type | Used for |
+|---|---|---|
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in the five *Read …* nodes and the three *Create …* nodes | Read what the app already holds and create apartados, abonos and ventas |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Report* node | Send the report to Marisa |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the report (Marisa); the flow fails before creating anything if it is empty |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of the report |
+| Data Table `migration_state` | n8n Data Table with columns `clave` (string), `activa` (boolean), `desde` (string) and one row `clave = migracion`, `activa = false` | The "migration running" flag: flow 10 switches it, flow 00 reads it |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 10 | Alert when the app is unreachable, a file is wrong, or the migration stops |
+
+The flow needs no change to `docker-compose.yml` and no access to the repo's `data/` folder: the CSV files are uploaded through its form.
+
+Suggested text:
+
+> **Migración del Excel antiguo (flujo 10).** El flujo `10 Excel Migration` pasa a la app el Excel de Marisa. Se ejecuta **a mano**, una vez: abre el formulario del flujo, sube el CSV de apartados y el CSV de ventas (los de `data/` sirven de ejemplo) y pulsa *Migrar*. El flujo limpia fechas, nombres, teléfonos e importes con `€`, crea los apartados y sus abonos con su **fecha original**, carga las ventas sueltas y **no carga lo dudoso**: un abono inicial de menos de 5 €, un abono mayor de lo que faltaba por pagar, filas sin fecha, importe o cliente, y todo lo que depende de un apartado que no se carga. Al terminar, Marisa recibe **un correo** con lo cargado, lo que ya estaba cargado y la lista de filas que necesitan su decisión, cada una con su motivo, y los abonos a los que el flujo puso «efectivo» porque el Excel no decía la forma de pago.
+>
+> **Se puede repetir sin duplicar.** Antes de crear algo, el flujo pregunta a la app si ya existe (mismo cliente, modelo, fecha e importe). Si una ejecución se corta a la mitad, repetirla carga solo lo que falte. Ojo: la app **no permite borrar**, así que prueba primero con una copia (una base nueva) y usa la real solo cuando el informe sea el esperado.
+>
+> **Durante la migración no salen avisos a clientes.** Mientras corre, el flujo marca la migración como activa en la tabla `migration_state` y el router (flujo 00) ignora todos los avisos de la app, para no mandar recibos de abonos antiguos. Se desactiva solo 15 segundos después de la última carga (los avisos tardan un poco en llegar a n8n) y, si algo se rompe, también al fallar. Si la marca se quedara activa por un fallo de n8n, el router la da por apagada a los 30 minutos. **Haz la migración con la tienda cerrada:** los avisos reales de ese momento también se ignoran.
+>
+> **Puesta en marcha.** Crea la tabla `migration_state` (columnas `clave`, `activa`, `desde`) con una fila `migracion` / `false`, importa `workflows/10-excel-migration.json` y la nueva versión de `workflows/00-event-router.json` (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe: renombra o archiva el router anterior antes de importar el nuevo, o copia en el router actual los nodos *Read Migration Flag* y *Check Migration Flag*, y vuelve a elegir los flujos de los nodos *Call …*), elige las credenciales (clave de la tienda y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* en el flujo 10 y publícalo. Después abre la *Production URL* del formulario. La ejecución queda en estado *waiting* hasta que alguien abre la página final («Migración terminada»); es el comportamiento normal de los formularios de n8n.
+
+Checked: cases and results in `workflows/tests/10-excel-migration.md` (throwaway stack on 2026-10-27; not yet repeated on the team's n8n with the real flows 01 and 02).

@@ -98,6 +98,23 @@ Result of 3.1 in the throwaway container (2026-10-23): A gave router success and
 
 Result of 3.1 on the team's n8n (reported by Manon, 2026-10-23): same behaviour, router success, failing handler error, and the next event still routed. Task 3.2 is answered by the table above.
 
+## Migration flag (task 3.2 of `add-excel-migration`, HU-10)
+
+The router now reads the Data Table `migration_state` (row `clave = migracion`) before **Route by Event**. While `activa` is true and `desde` is less than 30 minutes old, the event is ignored: no handler runs and the execution succeeds. The check itself is unit-tested: `node --test workflows/code/00-migration-flag.test.js` (5 tests).
+
+Set the row by hand (or let flow 10 do it), send payload 2 of the table above to `/webhook/tienda`, and check whether the flow 02 handler runs:
+
+| # | Flag row | Expected |
+|---|---|---|
+| F1 | `activa` false | routed to flow 02 as before |
+| F2 | `activa` true, `desde` 1 minute ago | ignored: router success, no handler run |
+| F3 | `activa` true, `desde` 29 minutes ago | ignored |
+| F4 | `activa` true, `desde` 31 minutes ago (left on by a crash) | routed |
+| F5 | table or row missing, or the read fails | routed (the failure shows on **Read Migration Flag**) |
+| F6 | `activa` false again | routed |
+
+Result on 2026-10-27 in a throwaway n8n 2.44.5 (router linked to the stub handlers, not the real flows): F1 to F4 and F6 as expected, in that order, by sending the event with each flag state and counting handler runs. F5 was covered by the unit test only. The seven payloads of the main table were not repeated after this change; they pass through **Check Migration Flag** unchanged (it forwards only `evento` and `datos`). Pending on the team's n8n: repeat the seven payloads and F1 to F4 with the real flows.
+
 ## Export check (task 4.1)
 
 On 2026-10-23 the router was exported from the team's n8n with `n8n export:workflow` (read-only) and compared with `workflows/00-event-router.json`. Same 7 nodes, same connections and same parameters; the editor only changed node positions and added its own defaults (for example `workflowInputs` on the Execute Workflow nodes). The raw editor export is not committed because it carries instance-specific data: workflow and sub-workflow IDs, the `errorWorkflow` ID, version IDs and the owner's project name. No credentials appear in either file. The generated file stays the portable version.
