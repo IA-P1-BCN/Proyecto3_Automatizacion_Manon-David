@@ -1,0 +1,458 @@
+{
+  "id": "pasoFirmeExpiredReservations06b",
+  "name": "06b Expired Reservations",
+  "active": false,
+  "nodes": [
+    {
+      "id": "expired-reservations-1",
+      "name": "Every Morning 09:05",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 9 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "expired-reservations-2",
+      "name": "Scheduled Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nreturn [{json: {mode: 'scheduled'}}];"
+      }
+    },
+    {
+      "id": "expired-reservations-3",
+      "name": "Manual Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "expired-reservations-4",
+      "name": "Choose Date",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        220
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mode",
+              "name": "mode",
+              "value": "manual",
+              "type": "string"
+            },
+            {
+              "id": "date",
+              "name": "fecha",
+              "value": "={{ $now.setZone(\"Europe/Madrid\").toFormat(\"yyyy-MM-dd\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "expired-reservations-5",
+      "name": "Prepare Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nreturn [{json: runInput($input.first().json, $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd'))}];"
+      }
+    },
+    {
+      "id": "expired-reservations-6",
+      "name": "Fetch Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "estado",
+              "value": "activo"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "expired-reservations-7",
+      "name": "Select Expired",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nconst response = $('Fetch Reservations').first().json;\nif (response.statusCode !== 200) throw new Error('No se pudo consultar la API de la tienda.');\nreturn selectExpired({reservations: response.body, today: $('Prepare Run').first().json.fecha}).map((json) => ({json}));"
+      }
+    },
+    {
+      "id": "expired-reservations-8",
+      "name": "Expire Reservation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://tienda:8000/api/apartados/{{ $json.id }}/vencer",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "expired-reservations-9",
+      "name": "Plan Notifications",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nconst selected = $('Select Expired').all().map((item) => item.json);\nconst results = $input.all().map((item) => item.json);\nconst {expired, failures} = collectExpiries(selected, results);\nconst {planned} = planNotifications({expired, failures});\nif (!planned.length) verifyResult({failures, bounced: [], summaryFailed: false}); // nothing expired at all: fail now\nreturn planned.map((json) => ({json: {...json, failures}}));"
+      }
+    },
+    {
+      "id": "expired-reservations-10",
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "send",
+              "leftValue": "={{ $json.send }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "expired-reservations-11",
+      "name": "Send Customer Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1900,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "expired-reservations-12",
+      "name": "Join",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2140,
+        120
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "expired-reservations-13",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2380,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nconst planned = $('Plan Notifications').all().map((item) => item.json);\nconst failures = planned[0].failures;\nconst sendResults = $('Send Customer Email').isExecuted ? $('Send Customer Email').all().map((item) => item.json) : [];\nconst shopAddress = String($env.TIENDA_EMAIL_AVISOS || '').trim();\nif (!shopAddress.includes('@')) throw new Error('Configure TIENDA_EMAIL_AVISOS.');\nconst items = planned.map(({failures: ignored, ...item}) => item);\nconst summary = buildSummary({planned: items, sendResults, today: $('Prepare Run').first().json.fecha, shopAddress});\nreturn [{json: {...summary, failures}}];"
+      }
+    },
+    {
+      "id": "expired-reservations-14",
+      "name": "Send Shop Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2620,
+        120
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "expired-reservations-15",
+      "name": "Verify Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 06b · Expired Reservations: pure logic shared by the generator and the tests.\n// Pasted ahead of each Code node's own lines. No credentials, no network, no time zones: Madrid's \"today\" is passed in.\n// The app is the source of truth: the voucher code and amount are shown as the app returned them, never calculated.\n\nfunction validDate(value) {\n  const parsed = new Date(`${value}T00:00:00Z`);\n  // An impossible date such as 2026-13-01 gives an Invalid Date, which must not escape as a RangeError.\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {\n    throw new Error('La fecha debe ser una fecha válida YYYY-MM-DD.');\n  }\n  return value;\n}\n\nfunction runInput(input, today) {\n  validDate(today);\n  const scheduled = input.mode === 'scheduled';\n  if (!scheduled && input.mode !== 'manual') throw new Error('Modo de ejecución no válido.');\n  const fecha = validDate(scheduled ? today : String(input.fecha || ''));\n  return { fecha, mode: input.mode };\n}\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction shoesOf(reservation) {\n  const size = String(reservation.talla ?? '').trim();\n  return size ? `«${reservation.producto}» (talla ${size})` : `«${reservation.producto}»`;\n}\n\n// Reservations to expire: still `activo` and with the deadline strictly before the run date (the deadline day itself is valid).\nfunction selectExpired({ reservations, today }) {\n  validDate(today);\n  if (!Array.isArray(reservations)) throw new Error('La API no devolvió una lista de apartados.');\n  const selected = [];\n  for (const reservation of reservations) {\n    if (reservation?.estado !== 'activo') continue;\n    if (!Number.isSafeInteger(reservation.id)) throw new Error('La API devolvió un apartado sin número válido.');\n    if (validDate(String(reservation.fecha_limite)) < today) selected.push({ id: reservation.id });\n  }\n  return selected;\n}\n\nfunction isVoucher(vale) {\n  return Boolean(vale) && typeof vale.codigo === 'string' && vale.codigo !== '' && typeof vale.importe === 'number' && Number.isFinite(vale.importe);\n}\n\n// `results[i]` is the Expire output for `selected[i]`; anything that is not a `vencido` reservation with its voucher is a failure.\nfunction collectExpiries(selected, results) {\n  if (!Array.isArray(selected) || !Array.isArray(results) || selected.length !== results.length) {\n    throw new Error('El número de respuestas de la API no coincide con los apartados a vencer.');\n  }\n  const expired = [];\n  const failures = [];\n  selected.forEach((item, i) => {\n    const { apartado, vale } = results[i] ?? {};\n    if (apartado?.id === item.id && apartado.estado === 'vencido' && isVoucher(vale)) {\n      expired.push({ apartado, vale });\n    } else {\n      failures.push({ id: item.id });\n    }\n  });\n  return { expired, failures };\n}\n\nfunction customerEmail({ apartado, vale }) {\n  return {\n    subject: `Tu apartado ha vencido: aquí tienes tu vale · ${apartado.producto}`,\n    body: [\n      `Hola ${apartado.cliente},`,\n      '',\n      `El plazo de tu apartado de ${shoesOf(apartado)} terminó el ${formatDate(apartado.fecha_limite)} y ha vencido.`,\n      '',\n      'Lo que habías abonado se ha convertido en un vale de compra:',\n      `Código del vale: ${vale.codigo}`,\n      `Importe del vale: ${formatEuros(vale.importe)}`,\n      '',\n      'El vale es crédito para comprar en la tienda; no se devuelve en dinero.',\n      '',\n      'Gracias por confiar en Zapatería Paso Firme.',\n    ].join('\\n'),\n  };\n}\n\n// One item per expired reservation. `send` is false when the customer has no usable email (the shop summary tells Marisa).\nfunction planNotifications({ expired, failures }) {\n  const planned = expired.map(({ apartado, vale }) => {\n    const send = hasUsableEmail(apartado.email);\n    return {\n      send,\n      to: send ? apartado.email.trim() : '',\n      ...(send ? customerEmail({ apartado, vale }) : { subject: '', body: '' }),\n      apartado,\n      vale,\n    };\n  });\n  return { planned, failures };\n}\n\nfunction summaryLine({ apartado, vale }) {\n  return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;\n}\n\n// `sendResults[i]` is the Send Email output for the i-th planned item with `send: true`; an `error` field means it was rejected.\nfunction buildSummary({ planned, sendResults, today, shopAddress }) {\n  validDate(today);\n  const toSend = planned.filter((item) => item.send);\n  if (!Array.isArray(sendResults) || sendResults.length !== toSend.length) {\n    throw new Error('El número de resultados de envío no coincide con los emails previstos.');\n  }\n  const bounced = new Set(toSend.filter((_, i) => sendResults[i]?.error).map((item) => item.apartado.id));\n  const byHand = planned.filter((item) => !item.send || bounced.has(item.apartado.id));\n  const lines = [\n    'Estos apartados han vencido y sus zapatos vuelven a la venta:',\n    '',\n    ...planned.map(summaryLine),\n  ];\n  if (byHand.length) {\n    lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');\n    for (const item of byHand) {\n      const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';\n      const reason = item.send ? 'el envío falló' : 'sin email válido';\n      lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);\n    }\n  }\n  return {\n    to: shopAddress,\n    subject: `Apartados vencidos el ${formatDate(today)}: ${planned.length} vuelven a la venta`,\n    body: lines.join('\\n'),\n    bounced: [...bounced],\n  };\n}\n\n// Fails loudly (after everything else was processed) so the Error Workflow alerts. Only ids and counts, no personal data.\nfunction verifyResult({ failures, bounced, summaryFailed }) {\n  const problems = [];\n  if (failures.length) problems.push(`no se pudieron vencer los apartados nº ${failures.map((f) => f.id).join(', ')}`);\n  if (bounced.length) problems.push(`falló el email al cliente de los apartados nº ${bounced.join(', ')} (su vale va en el resumen a la tienda)`);\n  if (summaryFailed) problems.push('no se pudo enviar el resumen a la tienda');\n  if (problems.length) throw new Error(`Vencimientos incompletos: ${problems.join('; ')}.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };\n}\n\nconst state = $('Build Summary').first().json;\nverifyResult({failures: state.failures, bounced: state.bounced, summaryFailed: Boolean($input.first().json.error)});\nreturn [{json: {fecha: $('Prepare Run').first().json.fecha, vencidos: $('Plan Notifications').all().length, fallidos: 0}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Every Morning 09:05": {
+      "main": [
+        [
+          {
+            "node": "Scheduled Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Run": {
+      "main": [
+        [
+          {
+            "node": "Choose Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Date": {
+      "main": [
+        [
+          {
+            "node": "Prepare Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Run": {
+      "main": [
+        [
+          {
+            "node": "Fetch Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Reservations": {
+      "main": [
+        [
+          {
+            "node": "Select Expired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Expired": {
+      "main": [
+        [
+          {
+            "node": "Expire Reservation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expire Reservation": {
+      "main": [
+        [
+          {
+            "node": "Plan Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Notifications": {
+      "main": [
+        [
+          {
+            "node": "Has Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Shop Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Shop Summary": {
+      "main": [
+        [
+          {
+            "node": "Verify Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Customer Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Join",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Send Customer Email": {
+      "main": [
+        [
+          {
+            "node": "Join",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

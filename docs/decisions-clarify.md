@@ -192,6 +192,7 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 | #20 Flujo de prueba | demo-data flow | Manon | `feat/20-demo-data-flow` |
 | #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
 | #32 Event router (single webhook, routes app events to flows 01 and 02) | `add-event-router` | Manon | `feat/32-event-router` |
+| #7 HU-07 · Apartados vencidos con su vale | 06b · `add-expired-reservations` | Manon | `feat/7-expired-reservations` |
 
 **Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
 
@@ -210,6 +211,21 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 
 **Consequence:** a plain environment variable is readable by every workflow of that instance, so it must hold no secret. The shop address is not one.
 
+## Expired reservations and vouchers (flow 06b, HU-07)
+2026-10-26 (Medium level; board assigns #6 and #7 to Manon)
+
+**Decision:**
+- Own workflow `06b Expired Reservations`, separate from flow 06 (reminders), run every day at **09:05 Europe/Madrid** and by hand for a chosen date.
+- A reservation is expired when it is `activo` and its `fecha_limite` is **strictly before** the run date (the deadline day itself is still valid, as in the app). The flow calls `POST /api/apartados/{id}/vencer`; the app creates the voucher.
+- The customer gets one Spanish email with the voucher `codigo` and `importe` from the app's response, and a note that the voucher is store credit, never cash. Marisa gets **one summary per run**: the shoes that go back on sale and the customers she must tell by hand (no usable `email`, or the email bounced).
+- No sent-record file: once expired a reservation is `vencido` and no longer listed, so a re-run does nothing. Each expiry has its own error output; the run fails at the end if any expiry or email failed, so flow 08 alerts.
+- The router keeps ignoring `apartado.vencido`, so the voucher email is sent only by this flow.
+
+**Why:** the app never closes a late reservation by itself, and the README asks for expiry by API, a voucher message and a list for Marisa. Expiry is a one-way state change, so the app itself gives idempotency.
+
+**Rejected:** doing it inside flow 06 (a failure expiring one reservation could block reminders); handling `apartado.vencido` in the router (loses the one summary per run; open question if Marisa expires by hand); a catch-up rule (the selection already covers every reservation before today, so the next run recovers a missed day).
+
+**Consequence:** a reservation expired by hand from the app screen sends no voucher email. If the expiry succeeds but the customer email fails, there is no automatic retry: the voucher code is in Marisa's summary and in the alert. The app checks its own real date, so a manual run with a past date can only narrow what is expired.
 ## Due date reminders (flow 06, HU-06)
 2026-10-26 (Medium level taken up after the Essential flows; board assigns #6 and #7 to Manon)
 
