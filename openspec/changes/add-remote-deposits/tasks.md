@@ -20,7 +20,7 @@
 
 ## 4. Test against all sample emails
 
-- [ ] 4.1 Send each of the nine emails in `data/correos/` to the inbox and verify the outcomes: 01 and 09 register; 02 registers by number; 03 registers and settles; 04 asks Marisa (overpayment); 05 asks Marisa; 06 asks Marisa (past deadline); 07 asks Marisa; 08 is ignored. Save a results table in `docs/evidence/03-remote-deposits/`.
+- [ ] 4.1 Send each of the nine emails in `data/correos/` to the inbox and verify the outcomes: 01 and 09 register; 02 registers by number; 03 registers and settles; 04 asks Marisa (overpayment); 05 asks Marisa; 06 asks Marisa (past deadline); 07 asks Marisa; 08 is ignored. Document the results table in `workflows/tests/`.
 - [ ] 4.2 Verify the customer receives their receipt from flow 02 for the registered ones and that this flow sends nothing to customers.
 - [ ] 4.3 Run the flow twice over the same emails and verify no duplicate deposits appear in the app.
 - [ ] 4.4 Stop the app container and send a payment email; verify the failure triggers flow 08's alert; restart the app.
