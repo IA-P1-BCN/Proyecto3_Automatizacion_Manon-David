@@ -1,3 +1,7 @@
 .env
 __pycache__/
 *.db
+
+# Local n8n exports retain personal addresses and instance credential references.
+/workflows/03 Remote Deposits.json
+/workflows/03-remote-deposits-tested.json
