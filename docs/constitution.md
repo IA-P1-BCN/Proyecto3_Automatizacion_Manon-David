@@ -61,8 +61,10 @@ A flow is done when:
 - [ ] JSON exported in `workflows/`, **without credentials**.
 - [ ] Required credentials and variables listed (without values) in the README.
 - [ ] PR reviewed by the other person; relevant prompts and agent corrections noted in `docs/ai-log.md`.
-- [ ] Execution evidence (screenshot or video) saved.
+- [ ] Test payloads and expected results documented in `workflows/tests/`.
 - [ ] Board card moved to *Done*.
+
+Execution evidence is a project-level deliverable, not a per-flow one. The brief asks for a single capture or video of one complete apartado: creation, deposits and settlement (confirmation email, receipts, liquidation message and daily close). Tracked in issue #21. Per-flow screenshots are optional.
 
 ## 7. Out of scope (for now)
 

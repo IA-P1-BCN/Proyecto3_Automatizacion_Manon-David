@@ -112,6 +112,31 @@ Suggested text:
 
 Checked: payloads and results in `workflows/tests/04-large-sale-alert.md`.
 
+## 8. Expired reservations, flow 06b (expired-reservations task 5.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 06b reuses what flows 02, 04 and 06 already use and adds nothing new:
+
+| Name | Type | Used for |
+|---|---|---|
+| shop Header Auth | n8n credential, chosen in *Fetch Reservations* and *Expire Reservation* | Read the active reservations and expire the late ones |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in *Send Customer Email* and *Send Shop Summary* | Voucher email to the customer and the summary to Marisa |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the summary (Marisa) |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of both emails |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 06b | Alert when the app is unreachable, an expiry is refused, or an email fails |
+
+No kDrive file: unlike flow 06, nothing is recorded, because an expired reservation is no longer listed as `activo`.
+
+Suggested text:
+
+> **Apartados vencidos (flujo 06b).** Cada día a las 09:05 (hora de Madrid) el flujo `06b Expired Reservations` busca los apartados `activo` cuya fecha límite ya pasó (el mismo día de la fecha límite todavía vale) y los vence con `POST /api/apartados/{id}/vencer`; la app crea el vale. Cada cliente recibe un correo con el código y el importe del vale, tal como los devuelve la app, y la aclaración de que el vale no se devuelve en dinero. Marisa recibe **un único resumen** con los zapatos que vuelven a la venta y, aparte, los clientes a los que hay que avisar a mano (sin email válido o con el correo rechazado), con su código de vale. Si algún vencimiento o correo falla, el flujo termina en error al final y el flujo 08 avisa; el resto de apartados se procesa igualmente.
+>
+> **Ejecución manual.** Con *Manual Run* y el campo `fecha` de *Choose Date* se simula otro día. La app usa su propia fecha real, así que una fecha anterior solo puede vencer menos apartados, nunca más.
+>
+> **Límites.** Si n8n está parado a las 09:05, no se pierde nada: la siguiente ejecución vence todo lo que siga fuera de plazo. Un apartado vencido a mano desde la pantalla de la app no genera correo de vale desde este flujo (el router sigue ignorando `apartado.vencido`). Si el vencimiento se hace y el correo al cliente falla, no se reenvía solo: Marisa tiene el código en el resumen.
+>
+> **Puesta en marcha.** Importa `workflows/06b-expired-reservations.json`, elige la credencial Header Auth de la tienda en los nodos *Fetch Reservations* y *Expire Reservation* y tu credencial SMTP en los dos nodos de correo, pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo.
+
+Checked: logic by unit tests; payloads and results in `workflows/tests/06b-expired-reservations.md` (n8n runs pending).
 ## 9. Due date reminders, flow 06 (due-reminders task 5.2)
 
 Add to the README's credentials/variables list (names only, never values). Flow 06 reuses what flows 05, 08 and 02 already need and adds no new variable:

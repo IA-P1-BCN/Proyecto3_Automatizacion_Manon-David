@@ -39,7 +39,7 @@
 
 - [x] 6.1 Export `workflows/10-excel-migration.json` and the updated `workflows/00-event-router.json`; verify neither contains credentials, `localhost`, real addresses or IDs.
 - [x] 6.2 Document in `docs/README-changes.md` the form, the files expected (columns), the Data Table `migration_state`, the credentials and variables used (names only), how to read the report, that the shop should be closed during the run, and that the app cannot undo a load; verify the text matches the tested flow.
-- [ ] 6.3 Save screenshots of the report email, the app after the load and the router showing ignored events in `docs/evidence/10-excel-migration/`, and add the entry to `docs/ai-log.md`; verify the entry says no data left n8n except the app calls and the report email.
+- [ ] 6.3 Document the test results in `workflows/tests/` and add the entry to `docs/ai-log.md`; verify the entry says no data left n8n except the app calls and the report email.
 - [ ] 6.4 Sync the issue with `python scripts/sync_issue_tasks.py 10`, open the PR to `dev` with `Closes #10` and verify the other teammate reviewed it.
 
 ## Workflow follow-up
