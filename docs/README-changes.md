@@ -137,3 +137,30 @@ Suggested text:
 > **Puesta en marcha.** Importa `workflows/06-due-reminders.json`, elige las credenciales (clave de la tienda, kDrive y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* y publícalo. Si n8n está parado a las 09:00, ese día no se envían los recordatorios y no se recuperan solos: ejecuta el flujo a mano con la fecha de ese día.
 
 Checked: cases and results in `workflows/tests/06-due-reminders.md`.
+
+## 10. Excel migration, flow 10 (excel-migration task 6.2)
+
+Add to the README's credentials/variables list (names only, never values). Flow 10 reuses what flows 08, 00 and 06 already need and adds one n8n Data Table:
+
+| Name | Type | Used for |
+|---|---|---|
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in the five *Read …* nodes and the three *Create …* nodes | Read what the app already holds and create apartados, abonos and ventas |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Report* node | Send the report to Marisa |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the report (Marisa); the flow fails before creating anything if it is empty |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of the report |
+| Data Table `migration_state` | n8n Data Table with columns `clave` (string), `activa` (boolean), `desde` (string) and one row `clave = migracion`, `activa = false` | The "migration running" flag: flow 10 switches it, flow 00 reads it |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 10 | Alert when the app is unreachable, a file is wrong, or the migration stops |
+
+The flow needs no change to `docker-compose.yml` and no access to the repo's `data/` folder: the CSV files are uploaded through its form.
+
+Suggested text:
+
+> **Migración del Excel antiguo (flujo 10).** El flujo `10 Excel Migration` pasa a la app el Excel de Marisa. Se ejecuta **a mano**, una vez: abre el formulario del flujo, sube el CSV de apartados y el CSV de ventas (los de `data/` sirven de ejemplo) y pulsa *Migrar*. El flujo limpia fechas, nombres, teléfonos e importes con `€`, crea los apartados y sus abonos con su **fecha original**, carga las ventas sueltas y **no carga lo dudoso**: un abono inicial de menos de 5 €, un abono mayor de lo que faltaba por pagar, filas sin fecha, importe o cliente, y todo lo que depende de un apartado que no se carga. Al terminar, Marisa recibe **un correo** con lo cargado, lo que ya estaba cargado y la lista de filas que necesitan su decisión, cada una con su motivo, y los abonos a los que el flujo puso «efectivo» porque el Excel no decía la forma de pago.
+>
+> **Se puede repetir sin duplicar.** Antes de crear algo, el flujo pregunta a la app si ya existe (mismo cliente, modelo, fecha e importe). Si una ejecución se corta a la mitad, repetirla carga solo lo que falte. Ojo: la app **no permite borrar**, así que prueba primero con una copia (una base nueva) y usa la real solo cuando el informe sea el esperado.
+>
+> **Durante la migración no salen avisos a clientes.** Mientras corre, el flujo marca la migración como activa en la tabla `migration_state` y el router (flujo 00) ignora todos los avisos de la app, para no mandar recibos de abonos antiguos. Se desactiva solo 15 segundos después de la última carga (los avisos tardan un poco en llegar a n8n) y, si algo se rompe, también al fallar. Si la marca se quedara activa por un fallo de n8n, el router la da por apagada a los 30 minutos. **Haz la migración con la tienda cerrada:** los avisos reales de ese momento también se ignoran.
+>
+> **Puesta en marcha.** Crea la tabla `migration_state` (columnas `clave`, `activa`, `desde`) con una fila `migracion` / `false`, importa `workflows/10-excel-migration.json` y la nueva versión de `workflows/00-event-router.json` (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe: renombra o archiva el router anterior antes de importar el nuevo, o copia en el router actual los nodos *Read Migration Flag* y *Check Migration Flag*, y vuelve a elegir los flujos de los nodos *Call …*), elige las credenciales (clave de la tienda y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* en el flujo 10 y publícalo. Después abre la *Production URL* del formulario. La ejecución queda en estado *waiting* hasta que alguien abre la página final («Migración terminada»); es el comportamiento normal de los formularios de n8n.
+
+Checked: cases and results in `workflows/tests/10-excel-migration.md` (throwaway stack on 2026-10-27; not yet repeated on the team's n8n with the real flows 01 and 02).
