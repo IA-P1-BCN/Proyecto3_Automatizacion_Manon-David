@@ -2,6 +2,9 @@
 // Run from the repo root: node workflows/code/build-00-event-router.js
 const fs = require('node:fs');
 
+// Same output on LF and CRLF checkouts.
+const flagCore = fs.readFileSync('workflows/code/00-migration-flag.js', 'utf8').replaceAll('\r\n', '\n');
+
 const id = (n) => `b1a1c1d1-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`;
 const write = (path, workflow) => fs.writeFileSync(path, `${JSON.stringify(workflow, null, 2)}\n`);
 
@@ -82,26 +85,57 @@ write('workflows/00-event-router.json', {
         options: {},
       },
     },
+    // Migration flag (HU-10): while the Excel migration runs, its own creates would trigger flows 01 and 02 for historical rows.
+    // A missing row, an unreadable table or a flag older than 30 minutes all mean "route as usual": a real event is never lost.
+    {
+      id: id(9),
+      name: 'Read Migration Flag',
+      type: 'n8n-nodes-base.dataTable',
+      typeVersion: 1.1,
+      position: [440, 0],
+      alwaysOutputData: true,
+      onError: 'continueRegularOutput',
+      parameters: {
+        resource: 'row',
+        operation: 'get',
+        dataTableId: { __rl: true, mode: 'name', value: 'migration_state' },
+        matchType: 'allConditions',
+        filters: { conditions: [{ keyName: 'clave', condition: 'eq', keyValue: 'migracion' }] },
+        returnAll: false,
+        limit: 1,
+      },
+    },
+    {
+      id: id(10),
+      name: 'Check Migration Flag',
+      type: 'n8n-nodes-base.code',
+      typeVersion: 2,
+      position: [660, 0],
+      parameters: {
+        mode: 'runOnceForAllItems',
+        jsCode: `${flagCore}\nif (isMigrationRunning($input.first()?.json, Date.now())) return [];\nconst event = $('Extract Event').first().json;\nreturn [{ json: { evento: event.evento, datos: event.datos } }];`,
+      },
+    },
     {
       id: id(3),
       name: 'Route by Event',
       type: 'n8n-nodes-base.switch',
       typeVersion: 3.2,
-      position: [440, 0],
+      position: [880, 0],
       parameters: {
         rules: { values: [eventIs('apartado.creado'), eventIs('abono.registrado'), eventIs('venta.registrada', id(61)), missingEvent] },
         options: { fallbackOutput: 'extra', renameFallbackOutput: 'unhandled event' },
       },
     },
-    callHandler(4, 'Call Reservation Confirmation (flow 01)', [700, -120]),
-    callHandler(5, 'Call Deposit Receipt (flow 02)', [700, 20]),
-    callHandler(8, 'Call Large Sale Alert (flow 04)', [700, 160]),
+    callHandler(4, 'Call Reservation Confirmation (flow 01)', [1140, -120]),
+    callHandler(5, 'Call Deposit Receipt (flow 02)', [1140, 20]),
+    callHandler(8, 'Call Large Sale Alert (flow 04)', [1140, 160]),
     {
       id: id(6),
       name: 'Reject Event Without Name',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
-      position: [700, 300],
+      position: [1140, 300],
       parameters: {
         jsCode: "throw new Error('El aviso de la tienda llegó sin nombre de evento');",
       },
@@ -111,13 +145,15 @@ write('workflows/00-event-router.json', {
       name: 'Ignore Unhandled Event',
       type: 'n8n-nodes-base.noOp',
       typeVersion: 1,
-      position: [700, 440],
+      position: [1140, 440],
       parameters: {},
     },
   ],
   connections: {
     'Receive App Event': { main: [[{ node: 'Extract Event', type: 'main', index: 0 }]] },
-    'Extract Event': { main: [[{ node: 'Route by Event', type: 'main', index: 0 }]] },
+    'Extract Event': { main: [[{ node: 'Read Migration Flag', type: 'main', index: 0 }]] },
+    'Read Migration Flag': { main: [[{ node: 'Check Migration Flag', type: 'main', index: 0 }]] },
+    'Check Migration Flag': { main: [[{ node: 'Route by Event', type: 'main', index: 0 }]] },
     'Route by Event': {
       main: [
         [{ node: 'Call Reservation Confirmation (flow 01)', type: 'main', index: 0 }],

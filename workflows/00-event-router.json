@@ -48,12 +48,59 @@
       }
     },
     {
+      "id": "b1a1c1d1-0000-4000-8000-000000000009",
+      "name": "Read Migration Flag",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "migration_state"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "clave",
+              "condition": "eq",
+              "keyValue": "migracion"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      }
+    },
+    {
+      "id": "b1a1c1d1-0000-4000-8000-000000000010",
+      "name": "Check Migration Flag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 00 · migration flag: pure check shared by the router generator and the tests.\n// Pasted ahead of the router's \"Check Migration Flag\" Code node. No network, no clock: \"now\" is passed in.\n\nconst MAX_FLAG_AGE_MS = 30 * 60 * 1000;\n\n// `row` is the `migration_state` row (or an empty/error item). The flag counts only while it is on AND recent:\n// a crashed migration can never silence the shop for more than 30 minutes.\nfunction isMigrationRunning(row, nowMs) {\n  if (!row || row.error || row.activa !== true) return false;\n  const since = Date.parse(row.desde);\n  if (Number.isNaN(since)) return false;\n  return nowMs - since < MAX_FLAG_AGE_MS && nowMs >= since - 60 * 1000;\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { MAX_FLAG_AGE_MS, isMigrationRunning };\n}\n\nif (isMigrationRunning($input.first()?.json, Date.now())) return [];\nconst event = $('Extract Event').first().json;\nreturn [{ json: { evento: event.evento, datos: event.datos } }];"
+      }
+    },
+    {
       "id": "b1a1c1d1-0000-4000-8000-000000000003",
       "name": "Route by Event",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        440,
+        880,
         0
       ],
       "parameters": {
@@ -161,7 +208,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        700,
+        1140,
         -120
       ],
       "parameters": {
@@ -183,7 +230,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        700,
+        1140,
         20
       ],
       "parameters": {
@@ -205,7 +252,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        700,
+        1140,
         160
       ],
       "parameters": {
@@ -227,7 +274,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        700,
+        1140,
         300
       ],
       "parameters": {
@@ -240,7 +287,7 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        700,
+        1140,
         440
       ],
       "parameters": {}
@@ -259,6 +306,28 @@
       ]
     },
     "Extract Event": {
+      "main": [
+        [
+          {
+            "node": "Read Migration Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Migration Flag": {
+      "main": [
+        [
+          {
+            "node": "Check Migration Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Migration Flag": {
       "main": [
         [
           {
