@@ -30,7 +30,7 @@
 
 ## 4. Test against all sample emails
 
-- [x] 4.1 Approved minimal test substitution: IMAP reception checked separately; all nine examples passed real-Groq extraction and matching via editor/manual injection. Cases 02/03/09 are eligible previews, not nine live financial writes. Dedicated #25 registration/replay and isolated API tests cover the financial operation; see evidence table and `groq-live-results.json`.
+- [x] 4.1 Approved minimal test substitution: IMAP reception checked separately; all nine examples passed real-Groq extraction and matching via editor/manual injection. Cases 02/03/09 are eligible previews, not nine live financial writes. Dedicated #25 registration/replay and isolated API tests cover the financial operation; document the results table in `workflows/tests/03-remote-deposits.md`, with supporting evidence in `docs/evidence/03-remote-deposits/groq-live-results.json`.
 - [x] 4.2 Actual app API abono on controlled reservation #26 triggered a temporary copy of the repository router/HU-02; user confirmed receipt with EUR 1 and EUR 14 pending. HU-03 sends no customer receipt. This is the shared app-event receipt integration, not a second HU-03 financial write.
 - [x] 4.3 Approved minimum replay test: user explicitly ran case 10 twice and verified unchanged EUR 6 paid/EUR 14 pending; agent independently confirmed one EUR 1 payment via API. This does not claim real replay testing of all nine sample emails.
 - [x] 4.4 Approved minimal automatic-error test: authenticated curl POST to a temporary protected copy of 99 Error Test triggered the existing published HU-05; user confirmed expected workflow/step/message. Did not stop the shop or claim a live HU-03 transport-failure test. All temporary test publications were removed afterwards.

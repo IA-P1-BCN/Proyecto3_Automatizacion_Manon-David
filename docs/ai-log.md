@@ -361,6 +361,17 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Publication authorization:** After the local resolution, David explicitly authorized commit and push to the existing PR branch, without merging. These operations are pending at the time of this entry; their observed result will be reported in the conversation.
 - **Remaining:** Recheck GitHub conflict status after publication. Human review and merge are separate pending actions. Issue/Project state was not changed.
 
+### AI-027 — Resolve PR #47 against the tested HU-03 checklist
+
+- **Date / issue / branch:** 2026-10-27; #3 — HU-03 · Abonos por Bizum o transferencia sin apuntar nada a mano; `docs/3-drop-evidence-task-v2`, PR #47, in an isolated worktree.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`; Git, GitHub CLI and Python.
+- **Request / authorization:** David initially authorized the conflict-resolution commit, created as `f824967`, without push. He subsequently explicitly requested fixing and merging PR #47, authorizing the remaining resolution, push and merge. No workflow execution was authorized.
+- **Finding:** The PR's one-line results-location edit was based on an obsolete unchecked checklist, conflicting with the approved minimal tests already recorded in `dev` after HU-03 integration.
+- **Resolution:** Preserve the current task completion states and all distinctions between live-provider previews, actual writes, receipt integration and error tests. In task 4.1, name `workflows/tests/03-remote-deposits.md` as the results-table document and retain the supporting `groq-live-results.json` reference. No existing evidence or workflow is removed or modified. After PR #38 was merged by David, preserve its AI-026 entry when updating this branch from `dev`.
+- **Verification:** Checklist comparison passed: only task 4.1's documentation references differ; all 23 task states match. Both referenced files exist. Check the final staged diff for whitespace errors and conflict markers before publication. No new integration or financial test is claimed.
+- **Review enforcement:** GitHub returned no formal reviews for #47 and reports `dev` as not branch-protected. Do not claim formal approval or bypass protection; this documentation-only merge was explicitly requested by David.
+- **Remaining:** Commit the update, push and perform the user-requested merge subject to GitHub checks; then verify remote state. These actions are pending at the time of this entry. No issue/Project state change is requested.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
