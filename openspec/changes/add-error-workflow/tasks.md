@@ -18,7 +18,7 @@
 ## 4. Test with real failures
 
 - [x] 4.1 Build `99-error-test` (Webhook → Code that throws the message from the request), set its *Error Workflow* to flow 08, export it inactive to `workflows/99-error-test.json`, and verify it contains no credentials.
-- [ ] 4.2 Run the five scenarios from the spec through `99-error-test` and verify each alert matches the expected result; save screenshots as evidence in `docs/evidence/08-error-workflow/`.
+- [ ] 4.2 Run the five scenarios from the spec through `99-error-test` and verify each alert matches the expected result; document the results in `workflows/tests/`.
 - [ ] 4.3 Verify an alert arrives within one minute and that the time shown is Madrid time.
 
 ## 5. Documentation and hand-off

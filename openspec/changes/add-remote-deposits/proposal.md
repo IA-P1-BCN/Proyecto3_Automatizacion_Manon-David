@@ -6,13 +6,28 @@ More customers pay their deposits by Bizum or bank transfer. Marisa has to read 
 
 ## What Changes
 
+- User-authorized extension to the application: optional `Idempotency-Key` support for payment registration, with atomic persistence, original-response replay, conflict rejection and no duplicate receipt event. Existing API callers remain compatible. This protects retries of the same identified payment, not different keys accidentally assigned to one bank transaction.
+
 - Add an n8n workflow, `03 Remote Deposits`, that watches the shop's Infomaniak inbox for bank notices.
 - Ignore emails that are not payments (such as bank advertising).
 - Use a free AI model **only to extract** payer, amount, concept and type from the email text. Validate its output.
 - Let the flow, not the AI, decide which reservation the payment belongs to (number in the concept, then payer-name matching) and call the app's API to register the deposit as `bizum`.
 - When the payment is doubtful, or the app rejects it (overpayment, past deadline), register nothing and email Marisa with the payment details and the reason.
 - Never send the customer a message from this flow: the app's `abono.registrado` event triggers the receipt flow (flow 02).
-- Process each bank email exactly once.
+- Protect repeated payment registration with stable keys; explicitly report uncertain outcomes rather than claiming exactly-once mailbox delivery.
+
+## Approved delivery cut (2026-10-27)
+
+Subsequently authorized: a small Manual Trigger and single-case selector inject
+existing fixture JSON without sending email. Stable case identifiers permit
+replay checks; no new mailbox runner or all-cases financial batch is introduced.
+
+The user explicitly deferred the protected approval form and a new mailbox test
+runner, requesting a two-hour implementation timebox. Deliver manual-review SMTP,
+conservative matching, guarded registration and minimal isolated tests. No
+exactly-once mailbox processing, review-email delivery or manual-entry
+reconciliation is claimed. Registration uses persistent application keys plus a
+content fingerprint to flag identical notices under different message IDs.
 
 ## Capabilities
 
