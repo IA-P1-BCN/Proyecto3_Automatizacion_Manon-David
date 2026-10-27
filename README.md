@@ -1,5 +1,20 @@
 # 👟 Proyecto: Automatizaciones con n8n · Zapatería Paso Firme
 
+## HU-03 implementation setup
+
+The essential workflow is `workflows/03-remote-deposits.json`. Import it as a draft
+and follow [the setup and minimal tests](docs/remote-deposits-setup.md). It requires
+local IMAP, Groq, shop Header Auth (`X-API-Key`) and SMTP credentials, plus local
+Error Workflow selection. The configuration node contains `authorized_test_sender`,
+`receiving_account_scope`, `shop_notice_to`, `shop_notice_from`, `allow_external_ai`,
+`allow_payment_registration` and `allow_shop_notices`; all effect gates default
+false. Only subject/body are sent to Groq, never the reservation list.
+
+The authorized backend retry-safety extension must be installed before financial
+writes; see [payment idempotency](docs/payment-idempotency.md). The approval form
+was explicitly deferred: Marisa resolves doubtful notices manually. Local/mocked
+checks are not proof of the final live integration; see [evidence](docs/evidence/03-remote-deposits/README.md).
+
 <img width="11520" height="3456" alt="n8n" src="https://github.com/user-attachments/assets/f8bdfbe6-0400-4f8e-a011-efb25c188db4" />
 
 ## 📋 Planteamiento

@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-27",
+  "provider": "Groq",
+  "model": "openai/gpt-oss-20b",
+  "environment": "Actual local n8n CLI execution of a temporary HU-03 draft with real Groq and read-only shop API",
+  "payment_registration_enabled": false,
+  "shop_notices_enabled": false,
+  "cases": [
+    { "case": "02", "passed": true, "extraction": "extracted", "decision": "register", "reservation_id": 2 },
+    { "case": "03", "passed": true, "extraction": "extracted", "decision": "register", "reservation_id": 3 },
+    { "case": "05", "passed": true, "extraction": "review", "decision": "review", "reason": "Missing payment concept" },
+    { "case": "06", "passed": true, "extraction": "extracted", "decision": "review", "reason": "Past deadline" },
+    { "case": "07", "passed": true, "extraction": "extracted", "decision": "review", "reason": "No clear reservation match" },
+    { "case": "09", "passed": true, "extraction": "extracted", "decision": "register", "reservation_id": 24 }
+  ],
+  "assertions": "Payer, amount, concept and payment type compared exactly with each fixture, plus expected matching decision and reservation ID where applicable",
+  "other_cases": "01, 04 and 08 were previously verified with real Groq by the user in the editor; case 10 verified a controlled actual registration and replay",
+  "limitations": "Register means eligible preview, not a financial write. Six remaining examples were injected directly, not sent as new mailbox messages. This is one correctness pass, not a reliability benchmark."
+}
