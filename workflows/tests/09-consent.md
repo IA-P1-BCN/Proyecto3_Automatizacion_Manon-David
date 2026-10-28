@@ -63,7 +63,7 @@ Run on 2026-10-28 in a throwaway stack (n8n 2.44.5, the repo's app image with `S
 | C7 | no customer mail; two alerts per event (flow 09 and the router) |
 | C8, C9 | 2 rows added, the `retirado` row untouched; the second run added nothing; no mail. Run through a temporary webhook attached to a **test copy** of 09b, because a manual trigger cannot be started from the API |
 | C10 | as expected; one customer mail to the active customer, one summary to the shop with both reasons |
-| C11 | **not run**: flow 06 needs the kDrive credential. Covered by unit tests and a structure test (the reminder email is only reachable through the consent check), and the exported JSON imports into n8n 2.44.5. **To run on the team's n8n.** |
+| C11 | run by Manon on the team's n8n on 2026-10-28 (not in the throwaway stack: flow 06 needs the kDrive credential). Two test reservations due in 7 days, one with consent (A) and one withdrawn (B). First run: *Keep Consented* kept 1 item, only A received the reminder, `avisos.csv` got one row for A and none for B. Second run: nothing sent, file unchanged. B set back to `activo` and a third run: B received the reminder and got a row, so the earlier skip had not been recorded as notified |
 | C12 | no mail while the flag was on; the next event after switching it off sent the confirmation |
 | C13 | the flow 08 alerts, the flow 06b summary and the "sin confirmación" warning of flow 01 reached the shop without any consent call (the daily close and the reports were not run) |
 | I1, I2 | pass (unit test) |
