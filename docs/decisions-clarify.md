@@ -46,7 +46,7 @@
 
 ## Consent to receive messages
 
-**Decision:** at Essential, consent is implied: whoever gives their `email` on the reservation receives notices **only about that reservation**. Real consent tracking is postponed to HU-14 (Advanced).
+**Decision:** at Essential, consent is implied: whoever gives their `email` on the reservation receives notices **only about that reservation**. Real consent tracking is postponed to HU-14 (Advanced); decided in [Personal data: consent register](#personal-data-consent-register-hu-14).
 
 **Why:** the app doesn't store consent and flows 1 and 2 already need to write to the customer. A separate register would add logic to every message.
 
@@ -314,3 +314,32 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 **Rejected:** mounting `data/` read-only into the n8n container (compose change for everyone, allow-list env vars, path differs per OS); uploading the CSVs to kDrive first (extra manual step and a dependency on the shared HU-04 folder for a one-off).
 
 **Also decided while writing the specs (to confirm in review):** (1) a sales line is a deposit repeat only if its concept mentions `abono` or `apartado` *and* a deposit has the same `fecha` and `importe`; a deposit-looking line with no match is held for Marisa; (2) a later row with a different `precio` than the first of its reservation is held; (3) the app's `422` is a safety net: it holds the row with the app's message; (4) the migration flag expires after 30 minutes so a crashed run cannot silence the shop forever.
+
+## Personal data: webhook authentication (HU-14)
+2026-10-28
+
+**Decision:** flow 00 accepts an event only with the shared secret `TIENDA_WEBHOOK_TOKEN`, in the `X-Webhook-Token` header or in the `?token=` query parameter, checked in a Code node (constant-time compare). Anything else gets `401` and no handler runs. The app's own calls carry the token in `N8N_WEBHOOK_URL`. An empty configured token rejects everything and raises a flow 08 alert; a wrong token does not alert (no email flood from probes).
+
+**Why:** the app is given and its sender (`backend/services/n8n.py`) only sends `Content-Type`, so the Webhook node's Header Auth would reject the app itself.
+
+**Rejected:** a secret in the webhook path (the path lands in the exported JSON, a secret in Git); a reverse proxy that injects the header (one more service for a small project); Header Auth on the node (breaks every flow). **Known limit:** a token in a URL can appear in access logs; fine on the Docker network, but over the internet (HU-16) it needs HTTPS and rotation.
+
+**Consequence:** everyone changes their own `.env`: `TIENDA_WEBHOOK_TOKEN` and `N8N_WEBHOOK_URL=…/webhook/tienda?token=…`, then `docker compose -p paso-firme up -d`.
+
+## Personal data: consent register (HU-14)
+2026-10-28
+
+**Decision:** an n8n Data Table `consentimientos` (`email` normalised, `estado` `activo`/`retirado`, `fecha`, `origen`) is the only list of people we may write to. `apartado.creado` with a valid email records `activo` (origin `tienda`) unless the row is `retirado`; the manual flow `09b` backfills the customers already in the app. Flows 01 and 02 are gated by the router; flows 06 and 06b call `09 Consent Check` before each customer email. Marisa withdraws consent by setting `estado` to `retirado`. A missing row, a withdrawn row, an invalid email or an unreadable table all mean **do not send**; an event with no email still reaches flows 01 and 02, which only warn the shop.
+
+**Why:** the Data Table is what flow 10 already uses, needs no credential and can be edited by Marisa. Failing closed is the opposite of the migration flag on purpose: writing to someone who did not agree is worse than a missed message.
+
+**Rejected:** Google Sheets (new credential, second system); explicit opt-in email with a confirm link (needs a public endpoint, stays in [future ideas](future-implementation-ideas.md)); editing flows 01 and 02 (the router already sees every event).
+
+**Assumption to confirm with Marisa:** an email given in the shop counts as consent for notices about that reservation, as the Essential decision already stated.
+
+## Personal data: what reaches an AI model (HU-14)
+2026-10-28
+
+**Decision:** `docs/ai-data-inventory.md` lists every AI node, what it receives and what it never receives. A unit test fails when an exported flow has an AI node that the inventory does not name.
+
+**Why:** a document alone drifts; the test keeps it honest. The test checks that the node is declared, not what data flows into it, which stays a review item.

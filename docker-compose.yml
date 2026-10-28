@@ -25,6 +25,7 @@ services:
       - KDRIVE_DRIVE_ID=${KDRIVE_DRIVE_ID:-}
       - KDRIVE_DIRECTORY_ID=${KDRIVE_DIRECTORY_ID:-}
       - TIENDA_UMBRAL_VENTA_GRANDE=${TIENDA_UMBRAL_VENTA_GRANDE:-}
+      - TIENDA_WEBHOOK_TOKEN=${TIENDA_WEBHOOK_TOKEN:-}
     volumes:
       - n8n_data:/home/node/.n8n
 

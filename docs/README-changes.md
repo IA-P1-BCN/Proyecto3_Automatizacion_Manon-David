@@ -207,3 +207,27 @@ Suggested text:
 > **Puesta en marcha.** Crea la tabla `migration_state` (columnas `clave`, `activa`, `desde`) con una fila `migracion` / `false`, importa `workflows/10-excel-migration.json` y la nueva versión de `workflows/00-event-router.json` (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe: renombra o archiva el router anterior antes de importar el nuevo, o copia en el router actual los nodos *Read Migration Flag* y *Check Migration Flag*, y vuelve a elegir los flujos de los nodos *Call …*), elige las credenciales (clave de la tienda y SMTP), pon *Settings → Error Workflow → `08 Error Workflow`* en el flujo 10 y publícalo. Después abre la *Production URL* del formulario. La ejecución queda en estado *waiting* hasta que alguien abre la página final («Migración terminada»); es el comportamiento normal de los formularios de n8n.
 
 Checked: cases and results in `workflows/tests/10-excel-migration.md` (throwaway stack on 2026-10-27; not yet repeated on the team's n8n with the real flows 01 and 02).
+
+## 12. Personal data protection, flows 00, 06, 06b, 09 and 09b (personal-data task 5.3)
+
+Add to the README's credentials/variables list (names only, never values). HU-14 changes how everyone's `.env` is set up, so announce it to the team when it lands:
+
+| Name | Type | Used for |
+|---|---|---|
+| `TIENDA_WEBHOOK_TOKEN` | environment variable in `.env` (passed to n8n by `docker-compose.yml`) | Secret that flow 00 requires on every event. Choose a long random value of your own (for example `openssl rand -hex 24`) |
+| `N8N_WEBHOOK_URL` | environment variable in `.env` (read by the app) | Now `http://n8n:5678/webhook/tienda?token=<the same value>`: the app can only post to a URL, so the secret goes at the end |
+| Data Table `consentimientos` | n8n Data Table with text columns `email`, `estado`, `fecha`, `origen` | The register of people who may receive messages: flow 00 records new customers, flows 09, 06 and 06b read it |
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in *Fetch Reservations* of flow 09b | Read the app's reservations for the one-off backfill |
+| `08 Error Workflow` | *Settings → Error Workflow* of flow 09 | Alert when the register cannot be read (no message is sent) |
+
+Suggested text:
+
+> **Protección de datos personales (HU-14).** Los avisos de la tienda llegan al router con un secreto: `TIENDA_WEBHOOK_TOKEN` en el `.env`, y el mismo valor al final de `N8N_WEBHOOK_URL` (`...?token=...`). Sin el secreto, o con uno incorrecto, el router responde `401` y no ejecuta nada. Si el secreto está vacío en n8n, rechaza todo y avisa por el flujo 08. El secreto no se sube nunca a Git. Después comprueba que el aviso es válido (nombre de evento, importes numéricos, email con forma de email); si no, el flujo 08 avisa con el campo que falla, sin nombres ni correos.
+>
+> **Consentimiento.** Solo se escribe a clientes que estén en la tabla `consentimientos` con `estado` = `activo`. Al crear un apartado con email, el router apunta al cliente (origen `tienda`); el flujo `09b Consent Backfill` apunta, una sola vez y a mano, a los clientes que ya estaban en la app. Para que un cliente deje de recibir mensajes, abre la tabla en n8n (*Data tables → consentimientos*) y cambia su `estado` a `retirado`. Un cliente sin fila, con la fila retirada o con la tabla ilegible **no recibe nada**: ni confirmación, ni recibo, ni recordatorio, ni aviso de vale (en ese caso el vale aparece en el resumen a la tienda para avisarle por otra vía).
+>
+> **Datos que van a un modelo de IA.** `docs/ai-data-inventory.md` lista cada nodo de IA y qué datos recibe. Hoy solo el flujo 03 envía a Groq el asunto y el texto de un correo del banco; ningún otro flujo envía datos a un modelo.
+>
+> **Puesta en marcha (en este orden).** 1) Crea la tabla `consentimientos`. 2) Importa los flujos 09 y 09b, elige la tabla, la credencial de la tienda (09b) y pon el *Error Workflow*; publica el 09 y ejecuta el 09b una vez. 3) Importa las nuevas versiones del router (`00`) y de los flujos 06 y 06b (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe), elige el flujo 09 en los nodos *Check Consent* y publica el router (n8n no deja publicarlo si algún flujo al que llama no está publicado). 4) Pon `TIENDA_WEBHOOK_TOKEN` y la nueva `N8N_WEBHOOK_URL` en tu `.env` y ejecuta `docker compose -p paso-firme up -d`. Hasta entonces, el router rechaza todos los avisos de la app. Si borras y vuelves a crear la tabla, hay que volver a elegirla en los nodos de los flujos 09 y 09b.
+
+Checked: cases and results in `workflows/tests/09-consent.md` (throwaway stack on 2026-10-28). Flow 06 was not run end to end because it needs the kDrive credential; run case C11 on the team's n8n.

@@ -8,8 +8,8 @@ Postponed on 2026-10-22 until the Medium level is reassessed.
 **Problem:** the API gives no settlement date for a reservation.
 **Candidate rules:** settled in the month = date of the last deposit; expired in the month = date of the voucher.
 
-## Consent register (HU-14, Advanced level)
-Postponed on 2026-10-22. Today consent is assumed to be implied by giving an email. If we reach Advanced: store it (e.g. Google Sheets) and check it before every send.
+## Explicit opt-in for consent (HU-14, Advanced level)
+Postponed on 2026-10-28. The consent register exists (see [the decision](decisions-clarify.md#personal-data-consent-register-hu-14)) but its basis is still "gave an email in the shop". Left for later: an opt-in email with a confirm link, and a link to withdraw consent from every message.
 
 ## Error Workflow: backup channel and alert grouping (flow 08)
 Postponed on 2026-10-22. If we reach Advanced: a backup channel (Sheets or Telegram) in case the email fails, and a limit or summary for repeated alerts.

@@ -80,13 +80,19 @@ const shopAddress = String($env.TIENDA_EMAIL_AVISOS || '').trim();
 if (!shopAddress.includes('@')) throw new Error('Configure TIENDA_EMAIL_AVISOS.');
 const today = ${run}.fecha;
 return planReminders({reservations: response.body, today, records, shopAddress}).map((json) => ({json}));`, 2140);
+// HU-14: flow 09 says who may be written to; the shop notices (no customer email) pass through untouched.
+code('Prepare Consent Check', "return withConsentEmail($input.all().map((item) => item.json)).map((json) => ({json}));", 2380);
+node('Check Consent (flow 09)', 'executeWorkflow', 1.2, {
+  source: 'database', workflowId: { __rl: true, value: '', mode: 'id' }, mode: 'once', options: { waitForSubWorkflow: true },
+}, 2600);
+code('Keep Consented', "return keepConsented($input.all().map((item) => item.json)).map((json) => ({json}));", 2820);
 node('Send Reminder', 'emailSend', 2.1, {
   fromEmail: '={{ $env.TIENDA_EMAIL_FROM }}', toEmail: '={{ $json.to }}',
   subject: '={{ $json.subject }}', emailFormat: 'text', text: '={{ $json.body }}', options: {},
 }, 2380, 0, { onError: 'continueRegularOutput' });
 
 // 4 · Record what was accepted, then fail if anything was rejected
-code('Collect Results', `const planned = $('Plan Reminders').all().map((item) => item.json);
+code('Collect Results', `const planned = $('Keep Consented').all().map((item) => item.json);
 const results = $input.all().map((item) => item.json);
 const state = ${run};
 const outcome = collectResults(planned, results, state.fecha);
@@ -123,13 +129,17 @@ for (const [from, to] of [
   ['Prepare Run', 'Fetch Reservations'], ['Fetch Reservations', 'List Records Folder'], ['List Records Folder', 'Locate Records'],
   ['Locate Records', 'Records Exist?'], ['Download Records', 'Read Downloaded Records'],
   ['Read Downloaded Records', 'Plan Reminders'], ['No Records Yet', 'Plan Reminders'],
-  ['Plan Reminders', 'Send Reminder'], ['Send Reminder', 'Collect Results'], ['Collect Results', 'Has Rows To Save?'],
+  ['Plan Reminders', 'Prepare Consent Check'], ['Prepare Consent Check', 'Check Consent (flow 09)'], ['Check Consent (flow 09)', 'Keep Consented'], ['Keep Consented', 'Send Reminder'], ['Send Reminder', 'Collect Results'], ['Collect Results', 'Has Rows To Save?'],
   ['Prepare Upload', 'Save Records'], ['Save Records', 'Verify Saved'],
 ]) link(from, to);
 link('Records Exist?', 'Download Records', 0);
 link('Records Exist?', 'No Records Yet', 1);
 link('Has Rows To Save?', 'Prepare Upload', 0);
 link('Has Rows To Save?', 'Verify Without Save', 1);
+
+// Make room for the three consent nodes: everything from Send Reminder on moves right.
+const consentNodes = new Set(['Prepare Consent Check', 'Check Consent (flow 09)', 'Keep Consented']);
+for (const item of nodes) if (item.position[0] >= 2380 && !consentNodes.has(item.name)) item.position[0] += 660;
 
 const workflow = { id: 'pasoFirmeDueReminders06', name: '06 Due Date Reminders', active: false, nodes, connections, settings: { executionOrder: 'v1', timezone: 'Europe/Madrid' } };
 fs.writeFileSync('workflows/06-due-reminders.json', `${JSON.stringify(workflow, null, 2)}\n`);

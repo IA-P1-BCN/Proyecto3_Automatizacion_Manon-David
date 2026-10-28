@@ -107,6 +107,18 @@ function planNotifications({ expired, failures }) {
   return { planned, failures };
 }
 
+// Flow 09 (consent) reads `email`: only the customers about to be emailed carry one.
+function withConsentEmail(planned) {
+  return planned.map((item) => ({ ...item, email: item.send ? item.to : '' }));
+}
+
+// A customer without consent is handled like one without email: nothing is sent and Marisa gets the voucher in the summary.
+function applyConsent(checked) {
+  return checked.map(({ permitido, razon, email, ...item }) => (
+    item.send && permitido !== true ? { ...item, send: false, to: '', motivo: 'sin_consentimiento' } : item
+  ));
+}
+
 function summaryLine({ apartado, vale }) {
   return `- ${shoesOf(apartado)} · apartado nº ${apartado.id} · ${apartado.cliente} · vale ${vale.codigo} (${formatEuros(vale.importe)})`;
 }
@@ -129,7 +141,7 @@ function buildSummary({ planned, sendResults, today, shopAddress }) {
     lines.push('', 'Clientes a avisar a mano (no se les pudo enviar el email):');
     for (const item of byHand) {
       const phone = item.apartado.telefono ? ` · teléfono ${item.apartado.telefono}` : '';
-      const reason = item.send ? 'el envío falló' : 'sin email válido';
+      const reason = item.send ? 'el envío falló' : item.motivo === 'sin_consentimiento' ? 'sin consentimiento para recibir mensajes automáticos' : 'sin email válido';
       lines.push(`- ${item.apartado.cliente} (apartado nº ${item.apartado.id})${phone} · vale ${item.vale.codigo} · motivo: ${reason}`);
     }
   }
@@ -151,5 +163,5 @@ function verifyResult({ failures, bounced, summaryFailed }) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };
+  module.exports = { withConsentEmail, applyConsent, runInput, selectExpired, collectExpiries, planNotifications, buildSummary, verifyResult };
 }
