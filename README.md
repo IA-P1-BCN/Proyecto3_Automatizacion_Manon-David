@@ -1,5 +1,10 @@
 # 👟 Proyecto: Automatizaciones con n8n · Zapatería Paso Firme
 
+## Layaway process map
+
+See the [manual and automated process maps](docs/process-map/README.md) for issue
+#19. SVG versions open in a web browser; the BPMN sources remain editable.
+
 ## HU-03 implementation setup
 
 The essential workflow is `workflows/03-remote-deposits.json`. Import it as a draft
