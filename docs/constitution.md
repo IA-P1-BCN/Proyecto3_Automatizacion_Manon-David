@@ -24,10 +24,10 @@ What Marisa does today with a notebook, a calculator and her memory should happe
 
 - **Zero secrets in Git:** not in the flow JSON, not in the agent instruction files, not in specs, not in a versioned `.env`. Credentials live only in n8n; `.env.example` has variable names only, no values.
 - Flows are exported **without credentials** and the diff is reviewed before every commit.
-- The n8n webhook requires authentication (header) and validates the body before acting.
-- **Minimisation:** an AI model receives only what is strictly needed (the text of the bank email; never the customer list or phone numbers). What data leaves is documented in the AI log.
+- The n8n webhook requires a shared secret (`X-Webhook-Token` header or `?token=` in the URL the app calls) and validates the body before acting ([decision](decisions-clarify.md#personal-data-webhook-authentication-hu-14)).
+- **Minimisation:** an AI model receives only what is strictly needed (the text of the bank email; never the customer list or phone numbers). What data leaves is listed in [ai-data-inventory.md](ai-data-inventory.md); a new AI node must be added there (a test fails otherwise).
 - Error alerts contain no keys or unnecessary personal data.
-- Messages go only to customers who consented (consent is implied by giving an `email`, only for their own reservation; [decision](decisions-clarify.md#consent-to-receive-messages)).
+- Messages go only to customers whose consent is in the register `consentimientos` and not withdrawn; giving an `email` in the shop records it, only for their own reservation ([decision](decisions-clarify.md#personal-data-consent-register-hu-14)).
 
 ## 4. How we work with the AI agent
 

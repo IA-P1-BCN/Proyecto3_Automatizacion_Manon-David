@@ -22,6 +22,7 @@ ISSUES = {
     20: ('add-demo-data-flow', 'WORKTREE'),
     6: ('add-due-reminders', 'WORKTREE'),
     10: ('add-excel-migration', 'WORKTREE'),
+    14: ('add-personal-data-protection', 'WORKTREE'),
 }
 
 

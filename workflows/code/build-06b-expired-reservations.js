@@ -69,10 +69,16 @@ const {expired, failures} = collectExpiries(selected, results);
 const {planned} = planNotifications({expired, failures});
 if (!planned.length) verifyResult({failures, bounced: [], summaryFailed: false}); // nothing expired at all: fail now
 return planned.map((json) => ({json: {...json, failures}}));`, 1420);
-node('Has Email?', 'if', 2.2, isTrue('send', '={{ $json.send }}'), 1660);
+// HU-14: flow 09 says who may be written to; a customer without consent is treated like one without email.
+code('Prepare Consent Check', "return withConsentEmail($input.all().map((item) => item.json)).map((json) => ({json}));", 1660);
+node('Check Consent (flow 09)', 'executeWorkflow', 1.2, {
+  source: 'database', workflowId: { __rl: true, value: '', mode: 'id' }, mode: 'once', options: { waitForSubWorkflow: true },
+}, 1880);
+code('Apply Consent', "return applyConsent($input.all().map((item) => item.json)).map((json) => ({json}));", 2100);
+node('Has Email?', 'if', 2.2, isTrue('send', '={{ $json.send }}'), 2320);
 email('Send Customer Email', 1900);
 node('Join', 'merge', 3, {}, 2140, 120);
-code('Build Summary', `const planned = $('Plan Notifications').all().map((item) => item.json);
+code('Build Summary', `const planned = $('Apply Consent').all().map((item) => item.json);
 const failures = planned[0].failures;
 const sendResults = $('Send Customer Email').isExecuted ? $('Send Customer Email').all().map((item) => item.json) : [];
 const shopAddress = String($env.TIENDA_EMAIL_AVISOS || '').trim();
@@ -90,12 +96,16 @@ return [{json: {fecha: ${run}.fecha, vencidos: $('Plan Notifications').all().len
 for (const [from, to] of [
   ['Every Morning 09:05', 'Scheduled Input'], ['Scheduled Input', 'Prepare Run'], ['Manual Run', 'Choose Date'], ['Choose Date', 'Prepare Run'],
   ['Prepare Run', 'Fetch Reservations'], ['Fetch Reservations', 'Select Expired'], ['Select Expired', 'Expire Reservation'],
-  ['Expire Reservation', 'Plan Notifications'], ['Plan Notifications', 'Has Email?'], ['Join', 'Build Summary'],
+  ['Expire Reservation', 'Plan Notifications'], ['Plan Notifications', 'Prepare Consent Check'], ['Prepare Consent Check', 'Check Consent (flow 09)'], ['Check Consent (flow 09)', 'Apply Consent'], ['Apply Consent', 'Has Email?'], ['Join', 'Build Summary'],
   ['Build Summary', 'Send Shop Summary'], ['Send Shop Summary', 'Verify Result'],
 ]) link(from, to);
 link('Has Email?', 'Send Customer Email', 0);
 link('Has Email?', 'Join', 1, 1);
 link('Send Customer Email', 'Join', 0, 0);
+
+// Make room for the three consent nodes: everything from Send Customer Email on moves right.
+const consentNodes = new Set(['Prepare Consent Check', 'Check Consent (flow 09)', 'Apply Consent', 'Has Email?']);
+for (const item of nodes) if (item.position[0] >= 1900 && !consentNodes.has(item.name)) item.position[0] += 660;
 
 const workflow = { id: 'pasoFirmeExpiredReservations06b', name: '06b Expired Reservations', active: false, nodes, connections, settings: { executionOrder: 'v1', timezone: 'Europe/Madrid' } };
 fs.writeFileSync('workflows/06b-expired-reservations.json', `${JSON.stringify(workflow, null, 2)}\n`);

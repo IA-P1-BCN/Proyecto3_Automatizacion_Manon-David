@@ -143,6 +143,19 @@ function planReminders({ reservations, today, records, shopAddress }) {
   return planned;
 }
 
+// Flow 09 (consent) reads `email`: only the customers about to be written to carry one; the shop notices carry none.
+function withConsentEmail(planned) {
+  return planned.map((item) => ({ ...item, email: item.resultado === 'enviado' ? item.to : '' }));
+}
+
+// Keeps what flow 09 allowed, plus the shop notices (no customer email, nothing to protect). A customer without consent
+// gets no reminder and is not recorded as notified.
+function keepConsented(checked) {
+  return checked
+    .filter((item) => item.permitido === true || item.razon === 'sin_email')
+    .map(({ permitido, razon, email, ...item }) => item);
+}
+
 // `results[i]` is the Send Email output for `planned[i]`; an `error` field means the SMTP server rejected it.
 function collectResults(planned, results, today) {
   validDate(today);
@@ -196,5 +209,5 @@ function findRecordsFile(pages) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { COLUMNS, THRESHOLDS, HISTORY_NAME, addDays, runInput, parseRecords, planReminders, collectResults, appendRecords, findRecordsFile };
+  module.exports = { withConsentEmail, keepConsented, COLUMNS, THRESHOLDS, HISTORY_NAME, addDays, runInput, parseRecords, planReminders, collectResults, appendRecords, findRecordsFile };
 }

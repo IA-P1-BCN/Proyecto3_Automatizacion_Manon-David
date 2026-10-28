@@ -1,6 +1,6 @@
 # Test payloads · 00 Event Router (issue #32)
 
-Send each payload as a `POST` to the router's webhook (`/webhook-test/tienda` while listening in the editor, `/webhook/tienda` once published). Payloads come from `docs/guia-de-la-app.md`. All data is the app's seeded sample data, no real customers.
+Send each payload as a `POST` to the router's webhook (`/webhook-test/tienda` while listening in the editor, `/webhook/tienda` once published), **with the secret**: `?token=<TIENDA_WEBHOOK_TOKEN>` at the end of the URL (HU-14, see the section at the end). Without it the router answers `401` and does nothing. Payloads come from `docs/guia-de-la-app.md`. All data is the app's seeded sample data, no real customers.
 
 | # | Payload | Expected route | Router execution |
 |---|---|---|---|
@@ -9,10 +9,10 @@ Send each payload as a `POST` to the router's webhook (`/webhook-test/tienda` wh
 | 3 | `{"evento": "venta.registrada", "datos": {"id": 257, "fecha": "2026-10-20", "concepto": "Crema calzado", "importe": 4.5, "forma_pago": "efectivo"}}` | Flow 04 only, receives `evento` and `datos` unchanged | success |
 | 4 | `{"evento": "apartado.vencido", "datos": {"apartado": {"id": 16, "cliente": "Paula Ramos", "estado": "vencido"}, "vale": {"id": 2, "codigo": "VALE-00016", "importe": 5.0}}}` | No handler yet: "unhandled event" output | success, no alert |
 | 5 | `{"evento": "cosa.rara", "datos": {}}` | "unhandled event" output | success, no alert |
-| 6 | `{"datos": {"id": 1}}` (no `evento`) | "missing event name" output, throws | error, flow 08 alert |
-| 7 | body `esto no es json`, `Content-Type: text/plain` | "missing event name" output, throws | error, flow 08 alert |
+| 6 | `{"datos": {"id": 1}}` (no `evento`) | `Extract Event` throws "falta evento o no es texto" (before HU-14: "missing event name" output) | error, flow 08 alert |
+| 7 | body `esto no es json`, `Content-Type: text/plain` | `Extract Event` throws "el cuerpo no es un objeto JSON" | error, flow 08 alert |
 
-The webhook answers immediately (`{"message": "Workflow was started"}`), so the app never waits for a handler.
+The webhook answers right after the token check (`200` with an empty body, or `401`), through a Respond to Webhook node, so the app never waits for a handler.
 
 ## Results
 
@@ -41,7 +41,8 @@ Not covered by the throwaway run: flow 08 attached to the router, a failing hand
 Run from any PowerShell window while the router is published. The `$url` line is shared by all commands. Payloads 1 and 2 contain accents, so they are sent as UTF-8 bytes.
 
 ```powershell
-$url = 'http://localhost:5678/webhook/tienda'
+$token = Read-Host 'TIENDA_WEBHOOK_TOKEN'
+$url = "http://localhost:5678/webhook/tienda?token=$token"
 
 # 1 · apartado.creado
 $body = '{"evento": "apartado.creado", "datos": {"id": 25, "fecha": "2026-10-20", "cliente": "Carmen Ruiz", "telefono": "612 345 001", "email": "carmen@example.com", "producto": "Botín piel marrón", "talla": "38", "precio": 89.9, "fecha_limite": "2027-01-18", "estado": "activo", "abonado": 10.0, "pendiente": 79.9}}'
@@ -67,14 +68,15 @@ Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '
 Invoke-RestMethod -Method Post -Uri $url -ContentType 'text/plain' -Body 'esto no es json'
 ```
 
-Every command prints `message: Workflow was started`, even for 6 and 7: the router answers first and fails afterwards. Check the outcome in n8n's Executions list.
+Every command prints an empty answer (`200`), even for 6 and 7: the router answers first and fails afterwards. Check the outcome in n8n's Executions list.
 
 ## Failing handler (tasks 3.1 and 3.2)
 
 `workflows/tests/00-stub-failing.json` is a test-only handler that always throws. Import it and publish it, then in the router point **Call Deposit Receipt (flow 02)** to it (put the normal stub back afterwards).
 
 ```powershell
-$url = 'http://localhost:5678/webhook/tienda'
+$token = Read-Host 'TIENDA_WEBHOOK_TOKEN'
+$url = "http://localhost:5678/webhook/tienda?token=$token"
 
 # A · deposit event: the handler fails
 Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' -Body '{"evento": "abono.registrado", "datos": {"cliente": "PRUEBA-ABONO"}}'
@@ -124,4 +126,8 @@ On 2026-10-23 the router was exported from the team's n8n with `n8n export:workf
 1. Import `workflows/tests/00-stub-reservation-confirmation.json` and `workflows/tests/00-stub-deposit-receipt.json` (placeholders until flows 01 and 02 exist; flow 04 is imported from `workflows/04-large-sale-alert.json`), then `workflows/00-event-router.json`.
 2. In the router, open the three *Call …* nodes (flows 01, 02 and 04) and choose the sub-workflow in the **Workflow** field. IDs differ on every n8n instance, so the JSON leaves them empty.
 3. Set *Settings → Error Workflow* of the router (and later of each handler) to `08 Error Workflow`.
-4. Publish the stubs, then the router. `N8N_WEBHOOK_URL` in `.env` must be `http://n8n:5678/webhook/tienda` for the real app.
+4. Publish the stubs, then the router. Since HU-14, `.env` needs `TIENDA_WEBHOOK_TOKEN` and `N8N_WEBHOOK_URL=http://n8n:5678/webhook/tienda?token=<the same value>` for the real app. n8n 2.44.5 also refuses to publish the router until every sub-workflow it calls (01, 02, 04 and 09) is published.
+
+## Authentication, validation and consent (HU-14)
+
+The router now checks the secret, validates the body and asks flow 09 for consent before flows 01 and 02. The routing table above still holds for requests that carry the token; the new cases (`401`, empty token, invalid body, consent) are in [09-consent.md](09-consent.md). Re-test of this table on 2026-10-28 in the throwaway stack: payload 3 reached flow 04 once, payloads 4 and 5 ended silently with no handler, payloads 1 and 2 reached flows 01 and 02 through flow 09 for a customer with consent. The `Reject Event Without Name` output no longer exists: the same cases are now rejected earlier, by the validation step.
