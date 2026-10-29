@@ -23,6 +23,7 @@ ISSUES = {
     6: ('add-due-reminders', 'WORKTREE'),
     10: ('add-excel-migration', 'WORKTREE'),
     14: ('add-personal-data-protection', 'WORKTREE'),
+    13: ('add-home-reservations', 'WORKTREE'),
 }
 
 

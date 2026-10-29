@@ -231,3 +231,38 @@ Suggested text:
 > **Puesta en marcha (en este orden).** 1) Crea la tabla `consentimientos`. 2) Importa los flujos 09 y 09b, elige la tabla, la credencial de la tienda (09b) y pon el *Error Workflow*; publica el 09 y ejecuta el 09b una vez. 3) Importa las nuevas versiones del router (`00`) y de los flujos 06 y 06b (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe), elige el flujo 09 en los nodos *Check Consent* y publica el router (n8n no deja publicarlo si algún flujo al que llama no está publicado). 4) Pon `TIENDA_WEBHOOK_TOKEN` y la nueva `N8N_WEBHOOK_URL` en tu `.env` y ejecuta `docker compose -p paso-firme up -d`. Hasta entonces, el router rechaza todos los avisos de la app. Si borras y vuelves a crear la tabla, hay que volver a elegirla en los nodos de los flujos 09 y 09b.
 
 Checked: cases and results in `workflows/tests/09-consent.md` (throwaway stack on 2026-10-28). Flow 06 was not run end to end because it needs the kDrive credential; run case C11 on the team's n8n.
+
+## 13. Home reservation requests, flows 11 and 11b and the hook in flow 03 (home-reservations task 5.3)
+
+Add to the README's credentials/variables list (names only, never values). Flow 11 reuses what flows 08, 09 and 10 already need and adds one n8n Data Table and one variable:
+
+| Name | Type | Used for |
+|---|---|---|
+| Data Table `solicitudes_apartado` | n8n Data Table with columns `ref`, `nombre`, `telefono`, `email`, `producto`, `estado`, `fecha`, `payment_key` (text) and `talla`, `precio`, `apartado_id` (number) | The requests waiting for their first payment. Flow 11 writes them, flow 11b reads and updates them |
+| SMTP (Infomaniak mailbox) | n8n credential, chosen in the *Send Email* node of flow 11 | Send the shop email and, when flow 09 allows it, the customer email |
+| Shop Header Auth (`X-API-Key`) | n8n credential, chosen in *Read Active Reservations* and *Create Apartado* of flow 11b | Read the app's reservations and create the apartado |
+| `TIENDA_EMAIL_AVISOS` | environment variable in `.env` | Address that receives the new-request email (Marisa); flow 11 fails before sending if it is empty |
+| `TIENDA_EMAIL_FROM` | environment variable in `.env` | Sender of both emails |
+| `TIENDA_PAGO_INSTRUCCIONES` | environment variable in `.env` (passed to n8n by `docker-compose.yml`, fake example in `.env.example`) | Text that tells the customer how to pay (Bizum number or IBAN). If it is empty, the email says to ask the shop |
+| `09 Consent Check` | flow chosen in *Check Consent (flow 09)* of flow 11 | Decide whether the customer may receive the email |
+| `11b Match Pending Request` | flow chosen in *Check Pending Home Request (flow 11b)*, the hook in flow 03 | Check each validated payment against the pending requests |
+| `08 Error Workflow` | *Settings → Error Workflow* of flows 11 and 11b | Alert when the table, the app or the mailbox fails |
+
+Where things live:
+
+- **Price list.** The `PRODUCTS` list in `workflows/code/11-home-reservations.js`, copied into the Code nodes of flow 11 by `node workflows/code/build-11-home-reservations.js`. The form dropdown is built from the same list, so the two cannot differ. It is mock data until Marisa gives the real catalogue; changing it means editing that file, running the generator and importing the flow again. A changed price affects only new requests, because each row stores its own price.
+- **Form URL.** Open the *Request Form* node of flow 11: the *Test URL* works while you test, and the *Production URL* appears once the flow is published. The form is public: share it only when the team agrees.
+- **Hook in flow 03.** Three nodes added before *Keep Bank Notice Context for Reservation Identification*: *Check Pending Home Request (flow 11b)*, *Route Home Request Result* and *Apartado Created From Home Request - Receipt Is Handled by Flow 01*. A payment that is not about a request comes back with `decision` = `not_mine` and follows the old path unchanged. The export has the workflow ID of the hook emptied: choose `11b Match Pending Request` after importing.
+- **Consent origin.** Flow 09 does not take an origin, so a customer recorded by the form gets origin `tienda`, like the ones recorded by the router.
+
+Suggested text:
+
+> **Reservas desde casa (HU-13).** La clienta o el cliente rellena el formulario del flujo `11 Home Reservations`: nombre, teléfono, email, modelo (el precio sale de la lista del flujo, nunca de lo que escriba), talla y la casilla de permiso. El flujo guarda la solicitud con una referencia `SOL-0001` en la tabla `solicitudes_apartado`, avisa a Marisa por correo y, si la persona dio su permiso, le escribe cómo pagar: un Bizum o una transferencia de **al menos 5 €** con la referencia como concepto. Si pide lo mismo dos veces mientras espera, recibe la referencia de antes en vez de una segunda solicitud. **Todavía no existe ningún apartado**: la app no admite un apartado sin abono.
+>
+> **El apartado se crea solo cuando llega el pago.** El flujo 03 lee el aviso del banco como siempre y, antes de buscar un apartado existente, pregunta al flujo `11b Match Pending Request` si el pago es de una solicitud. Con la referencia en el concepto, el pago es de esa solicitud si el ordenante encaja con el nombre. Sin referencia, solo si hay una única solicitud que encaja con el nombre completo y **ningún apartado activo** con ese nombre; con un nombre abreviado se necesita la referencia. Si es suya, el flujo crea el apartado en la app con el importe pagado como abono inicial y marca la solicitud `confirmada` con el número del apartado. La confirmación al cliente la envía el flujo 01 desde el aviso de la app: estos flujos no mandan ningún otro correo. Si el importe no es válido (por ejemplo 3 €), la app lo rechaza, la solicitud vuelve a `pendiente` y Marisa recibe el motivo de la app. Un mismo pago no crea dos apartados: la solicitud se reserva antes de llamar a la app, y si algo queda a medias (`procesando`), el correo a Marisa avisa de que debe comprobar la app antes de tocar la fila.
+>
+> **Cancelar una solicitud.** Abre la tabla en n8n (*Data tables → solicitudes_apartado*) y cambia su `estado` a `cancelada`. Una solicitud cancelada o confirmada no bloquea una nueva del mismo cliente, modelo y talla.
+>
+> **Puesta en marcha (en este orden).** 1) Crea la tabla `solicitudes_apartado` con todas sus columnas. 2) Pon `TIENDA_PAGO_INSTRUCCIONES` en tu `.env` y ejecuta `docker compose -p paso-firme up -d`. 3) Importa `workflows/11b-match-request.json` y `workflows/11-home-reservations.json` (`scripts/import_new_workflows.py` no sustituye un flujo que ya existe), elige las credenciales (clave de la tienda en el 11b, SMTP en el 11), el flujo 09 en el 11 y la tabla en los nodos que la usan, y pon *Settings → Error Workflow → `08 Error Workflow`* en los dos. 4) Importa la nueva versión de `workflows/03-remote-deposits.json` (renombra o archiva la anterior antes) y elige `11b Match Pending Request` en el nodo del gancho. 5) Publica el 11b antes de publicar los flujos que lo llaman. Con `allow_payment_registration` en `false`, el flujo 03 solo enseña una «Vista previa» a Marisa y no crea nada.
+
+Checked: cases and results in `workflows/tests/11-home-reservations.md`. On the team's n8n on 2026-10-29: the request form (own email), flow 03 with the hook for the nine synthetic notices (all give the outcomes they gave before; the table held two unrelated rows, not none), the preview with registration off and the creation with registration on (apartado created, row `confirmada`, one confirmation email from flow 01). Two payments at once and the app failing during creation are covered by unit tests only.

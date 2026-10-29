@@ -1,0 +1,758 @@
+{
+  "id": "pasoFirmeMatchRequest11b",
+  "name": "11b Match Pending Request",
+  "active": false,
+  "nodes": [
+    {
+      "id": "match-request-1",
+      "name": "When Called By Flow 03",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "match-request-2",
+      "name": "Read Requests",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "match-request-3",
+      "name": "Read Active Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "estado",
+              "value": "activo"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "match-request-4",
+      "name": "Decide Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst input = $('When Called By Flow 03').first().json;\nconst response = $('Read Active Reservations').first().json;\nif (response.statusCode !== 200 || !Array.isArray(response.body)) throw new Error('No se pudo consultar la API de la tienda.');\nconst requests = $('Read Requests').all().map((item) => item.json);\nconst decision = decideRequest({payment: input.payment, requests, reservations: response.body, allowRegistration: input.allow_payment_registration});\nreturn [{json: {...input, ...decision}}];"
+      }
+    },
+    {
+      "id": "match-request-5",
+      "name": "Create Apartado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "create",
+              "leftValue": "={{ $json.crear }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "match-request-6",
+      "name": "Claim Request",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        -120
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ref",
+              "condition": "eq",
+              "keyValue": "={{ $json.request.ref }}"
+            },
+            {
+              "keyName": "estado",
+              "condition": "eq",
+              "keyValue": "pendiente"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "estado": "procesando",
+            "payment_key": "={{ $json.payment_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payment_key",
+              "displayName": "payment_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "match-request-7",
+      "name": "Read Claim",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        -120
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "returnAll": true,
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ref",
+              "condition": "eq",
+              "keyValue": "={{ $('Decide Request').first().json.request.ref }}"
+            }
+          ]
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "match-request-8",
+      "name": "Check Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst context = $('Decide Request').first().json;\nconst rows = $input.all().map((item) => item.json);\nif (claimHolds(rows, context.request, context.payment_key)) return [{json: {...context, claimed: true}}];\nreturn [{json: {...context, claimed: false, decision: 'review', crear: false,\n  reason: `La solicitud ${context.request.ref} ya se está procesando con otro pago o no está pendiente.`}}];"
+      }
+    },
+    {
+      "id": "match-request-9",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "claimed",
+              "leftValue": "={{ $json.claimed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "match-request-10",
+      "name": "Build Apartado Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst context = $('Check Claim').first().json;\nreturn [{json: {...context, body: buildApartadoBody(context.request, context.payment)}}];"
+      }
+    },
+    {
+      "id": "match-request-11",
+      "name": "Create Apartado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        -240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "match-request-12",
+      "name": "Interpret Creation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst context = $('Build Apartado Body').first().json;\nconst outcome = interpretCreation($input.first().json, context.request);\nreturn [{json: {...context, ...outcome}}];"
+      }
+    },
+    {
+      "id": "match-request-13",
+      "name": "Confirmed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        -240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "confirmed",
+              "leftValue": "={{ $json.accion === 'confirmar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "match-request-14",
+      "name": "Mark Confirmed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3120,
+        -360
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ref",
+              "condition": "eq",
+              "keyValue": "={{ $('Interpret Creation').first().json.request.ref }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "estado": "confirmada",
+            "apartado_id": "={{ $('Interpret Creation').first().json.apartado_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "apartado_id",
+              "displayName": "apartado_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "match-request-15",
+      "name": "Released?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "released",
+              "leftValue": "={{ $json.accion === 'liberar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "match-request-16",
+      "name": "Release Request",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        -240
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ref",
+              "condition": "eq",
+              "keyValue": "={{ $('Interpret Creation').first().json.request.ref }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "estado": "pendiente",
+            "payment_key": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payment_key",
+              "displayName": "payment_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "match-request-17",
+      "name": "Check Row Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        -300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst context = $('Interpret Creation').first().json;\nconst update = $input.first().json;\nreturn [{json: afterRowUpdate(context, update)}];"
+      }
+    },
+    {
+      "id": "match-request-18",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11b · a bank payment may open a reservation from a pending home request: pure logic, shared by the generator and the tests.\n// Called by flow 03 before it looks at existing reservations. It answers with the same context fields flow 03 already uses\n// (`decision`, `reason`), so flow 03 can send its usual review email. The AI never takes part: the payment is already extracted.\n\n// Name rules copied from 03-match-bank-payment.js on purpose: flow 03 is not edited here and does not export them.\nfunction normalizedWords(value) {\n  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\\s+/).filter(Boolean);\n}\nfunction fullNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return stored.length >= 2 && stored.every((word) => tokens.includes(word));\n}\nfunction abbreviatedNameFits(payer, customer) {\n  const tokens = normalizedWords(payer), stored = normalizedWords(customer);\n  return tokens.length === 2 && tokens[0].length > 1 && tokens[1].length === 1\n    && stored.length >= 2 && tokens[0] === stored[0] && stored[1].startsWith(tokens[1]);\n}\n\nconst eur = (value) => `${Number(value).toFixed(2).replace('.', ',')} €`;\nconst isRow = (row) => Boolean(row) && typeof row.ref === 'string' && row.ref !== '';\n\n// \"SOL-7\", \"sol 0007\" and \"SOL-0007\" are the same reference.\nfunction extractRefs(concept) {\n  const found = [...String(concept || '').matchAll(/\\bSOL[-\\s]?(\\d{1,6})\\b/gi)].map((match) => `SOL-${match[1].padStart(4, '0')}`);\n  return [...new Set(found)];\n}\n\nconst review = (reason) => ({ decision: 'review', reason, crear: false, request: null });\nconst notMine = { decision: 'not_mine', reason: '', crear: false, request: null };\n\n// `requests` are the Data Table rows, `reservations` the active reservations from the app.\n// With a reference only that request is considered, and the payer must fit its name.\n// Without one, the payment is taken only when exactly one pending request fits the payer and no active reservation does.\nfunction decideRequest({ payment, requests, reservations, allowRegistration }) {\n  const rows = (requests || []).filter(isRow);\n  if (!payment || !Number.isFinite(payment.importe) || payment.importe <= 0) return notMine;\n\n  const refs = extractRefs(payment.concepto);\n  let request;\n  if (refs.length > 1) return review('El concepto contiene varias referencias de solicitud (SOL-…). No se ha registrado nada.');\n  if (refs.length === 1) {\n    request = rows.find((row) => row.ref === refs[0]);\n    if (!request) return review(`La referencia ${refs[0]} no existe en las solicitudes de apartado.`);\n    if (request.estado !== 'pendiente') {\n      return review(`La solicitud ${request.ref} está en estado «${request.estado}» y no admite este pago.`);\n    }\n    if (!fullNameFits(payment.ordenante, request.nombre) && !abbreviatedNameFits(payment.ordenante, request.nombre)) {\n      return review(`El ordenante no coincide con la solicitud ${request.ref}. No se reasigna el pago.`);\n    }\n  } else {\n    const requestMatches = rows.filter((row) => row.estado === 'pendiente' && fullNameFits(payment.ordenante, row.nombre));\n    if (!requestMatches.length) return notMine;\n    const reservationMatches = (reservations || []).filter((item) => fullNameFits(payment.ordenante, item.cliente));\n    if (requestMatches.length > 1 || reservationMatches.length) {\n      return review('El pago podría ser de una solicitud pendiente o de un apartado existente. Decide Marisa.');\n    }\n    request = requestMatches[0];\n  }\n\n  if (allowRegistration !== true) {\n    return review(`Vista previa: se habría creado el apartado de la solicitud ${request.ref} con un abono inicial de ${eur(payment.importe)}.`);\n  }\n  return { decision: 'candidate', reason: '', crear: true, request };\n}\n\n// The request's own data plus the paid amount as the initial deposit; the app decides whether the amount is acceptable.\nfunction buildApartadoBody(request, payment) {\n  const body = {\n    cliente: request.nombre, producto: request.producto, talla: String(request.talla),\n    precio: Number(request.precio), abono_inicial: payment.importe, forma_pago: 'bizum',\n  };\n  if (String(request.telefono || '').trim()) body.telefono = String(request.telefono).trim();\n  if (String(request.email || '').trim()) body.email = String(request.email).trim();\n  return body;\n}\n\n// After the claim update, the table is read again: only the payment whose key is stored may go on.\nfunction claimHolds(rows, request, paymentKey) {\n  const row = (rows || []).filter(isRow).find((item) => item.ref === request.ref);\n  return Boolean(row) && row.estado === 'procesando' && row.payment_key === paymentKey;\n}\n\n// `accion` tells the flow what to do with the row: confirm it, release it, or leave it alone.\nfunction interpretCreation(response, request) {\n  if (response && response.statusCode === 201 && Number.isSafeInteger(response.body && response.body.id)) {\n    return { decision: 'created', reason: '', accion: 'confirmar', apartado_id: response.body.id };\n  }\n  if (response && [404, 409, 422].includes(response.statusCode)) {\n    const detail = typeof (response.body && response.body.detail) === 'string' ? response.body.detail.slice(0, 500) : 'La aplicación ha rechazado el apartado.';\n    return { decision: 'review', reason: `La aplicación no ha creado el apartado de la solicitud ${request.ref}: ${detail}`, accion: 'liberar' };\n  }\n  // The outcome is unknown, so the row stays «procesando» and nobody should register it by hand before checking the app.\n  return {\n    decision: 'uncertain', accion: 'dejar',\n    reason: `No se pudo confirmar si se creó el apartado de la solicitud ${request.ref}. Revisar la aplicación antes de apuntar nada manualmente.`,\n  };\n}\n\n// If the row cannot be updated after the app answered, the table is out of step with the app: say so, never hide it.\nfunction afterRowUpdate(context, updateItem) {\n  if (!updateItem || !updateItem.error) return context;\n  return {\n    ...context, decision: 'uncertain',\n    reason: `${context.reason ? `${context.reason} ` : ''}No se pudo actualizar la solicitud ${context.request.ref} en la tabla solicitudes_apartado: revisarla a mano. Comprobar la aplicación antes de apuntar nada.`,\n  };\n}\n\n// What flow 03 receives: its own context fields, without this flow's working fields.\n// A payment that is not about a request goes back as it came in plus `decision: 'not_mine'`, which is what flow 03's Switch routes on.\n// Nothing else is touched: flow 03 still reads fields such as `reason` and `result` on its own item, and it overwrites\n// `decision` itself when it matches reservations.\nfunction toResult(context, original) {\n  if (context.decision === 'not_mine') return { ...original, decision: 'not_mine' };\n  const { crear, claimed, body, accion, request, ...rest } = context;\n  return { ...rest, request_ref: request ? request.ref : null, candidates: [], registration_allowed: false };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = {\n    extractRefs, decideRequest, buildApartadoBody, claimHolds, interpretCreation, afterRowUpdate, toResult, fullNameFits, abbreviatedNameFits,\n  };\n}\n\nconst context = $input.first().json;\nreturn [{json: toResult(context, $('When Called By Flow 03').first().json)}];"
+      }
+    }
+  ],
+  "connections": {
+    "When Called By Flow 03": {
+      "main": [
+        [
+          {
+            "node": "Read Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Requests": {
+      "main": [
+        [
+          {
+            "node": "Read Active Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Active Reservations": {
+      "main": [
+        [
+          {
+            "node": "Decide Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Request": {
+      "main": [
+        [
+          {
+            "node": "Create Apartado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Apartado?": {
+      "main": [
+        [
+          {
+            "node": "Claim Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Request": {
+      "main": [
+        [
+          {
+            "node": "Read Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Claim": {
+      "main": [
+        [
+          {
+            "node": "Check Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Claim": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Build Apartado Body",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Apartado Body": {
+      "main": [
+        [
+          {
+            "node": "Create Apartado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Apartado": {
+      "main": [
+        [
+          {
+            "node": "Interpret Creation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpret Creation": {
+      "main": [
+        [
+          {
+            "node": "Confirmed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmed?": {
+      "main": [
+        [
+          {
+            "node": "Mark Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Released?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Released?": {
+      "main": [
+        [
+          {
+            "node": "Release Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Confirmed": {
+      "main": [
+        [
+          {
+            "node": "Check Row Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Request": {
+      "main": [
+        [
+          {
+            "node": "Check Row Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Row Update": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}
