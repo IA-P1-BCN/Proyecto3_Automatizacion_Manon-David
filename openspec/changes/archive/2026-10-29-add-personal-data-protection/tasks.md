@@ -32,7 +32,7 @@ tick
 - [x] 5.1 Save the scenarios and expected results in `workflows/tests/09-consent.md` (every spec scenario, including the 401 cases and the fail-closed cases); verify every spec scenario is covered.
 - [x] 5.2 Export `00-event-router.json`, `06`, `06b`, `09` and `09b`; verify none contains credentials, the token value, real addresses or `localhost`, and run the whole unit-test suite.
 - [x] 5.3 Document the new variable and table, the changed `N8N_WEBHOOK_URL`, how to withdraw consent and the import order (create the table → import 09 → run 09b → import the router) in `docs/README-changes.md`; add the entry to `docs/ai-log.md`.
-- [ ] 5.4 Sync the issue with `python scripts/sync_issue_tasks.py 14`, open the PR to `dev` with `Closes #14` and verify the other teammate reviewed it.
+- [x] 5.4 Sync the issue with `python scripts/sync_issue_tasks.py 14`, open the PR to `dev` with `Closes #14` and verify the other teammate reviewed it. Done: PR #51 merged by the other teammate.
 
 ## Workflow follow-up
 

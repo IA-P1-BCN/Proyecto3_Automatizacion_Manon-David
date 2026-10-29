@@ -11,14 +11,14 @@
 
 - [x] 2.1 Connect the flow to the event router and set flow 08 as its *Error Workflow*; verify by creating a reservation in the app UI that the email arrives within one minute with the amounts shown by the app.
 - [x] 2.2 Create reservations without email, with a malformed email and paid in full, and verify the shop alert / pick-up text appears and the executions are marked successful.
-- [ ] 2.3 Break the SMTP credential temporarily and verify the failure triggers flow 08's alert; restore the credential.
+- [ ] 2.3 Break the SMTP credential temporarily and verify the failure triggers flow 08's alert; restore the credential. Not run: decided not to break the SMTP credential (2026-10-29); archived with this open.
 - [x] 2.4 Verify one email is sent per event by creating two reservations in a row and counting messages.
 
 ## 3. Export and docs
 
 - [x] 3.1 Export to `workflows/01-reservation-confirmation.json` and verify no credentials or real addresses are in it.
 - [x] 3.2 Add the flow to the README credentials/variables list and save screenshots of the received emails in `docs/evidence/01-reservation-confirmation/`.
-- [ ] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
+- [x] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it. Done: AI-010 logged, PR #35 merged by the other teammate.
 
 ## Workflow follow-up
 

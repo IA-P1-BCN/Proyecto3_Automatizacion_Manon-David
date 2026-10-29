@@ -18,7 +18,7 @@
 
 - [x] 3.1 Export to `workflows/90-demo-data.json` and verify no credentials, no real addresses and no `localhost` are in it.
 - [x] 3.2 Write `workflows/tests/90-demo-data.md` (expected final states, email count, PowerShell checks with `Invoke-RestMethod`), add the flow to the README credentials/variables list in `docs/README-changes.md`, and save screenshots of the demo reservations in the app and of the received emails in `docs/evidence/90-demo-data/`.
-- [ ] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
+- [x] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it. Done: AI-013 logged, PR #38 merged by the other teammate.
 
 ## Workflow follow-up
 
