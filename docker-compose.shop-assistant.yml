@@ -1,0 +1,41 @@
+# Optional HU-12 adapter only. Never run a broad reset/recreate of the existing stack.
+services:
+  shop-assistant-bridge:
+    build:
+      context: ./services/shop-assistant-bridge
+      args:
+        BRIDGE_UID: ${HU12_BRIDGE_UID:-10001}
+    environment:
+      HU12_TELEGRAM_TOKEN_FILE: /run/secrets/hu12-telegram-token
+      HU12_BRIDGE_KEY_FILE: /run/secrets/hu12-bridge-key
+      HU12_OWNER_USER_ID: ${HU12_OWNER_USER_ID:-}
+      HU12_OWNER_CHAT_ID: ${HU12_OWNER_CHAT_ID:-}
+      HU12_N8N_URL: ${HU12_N8N_URL:-http://n8n:5678/webhook-test/hu12-shop-assistant}
+      HU12_ALLOW_TELEGRAM_SEND: ${HU12_ALLOW_TELEGRAM_SEND:-false}
+      HU12_STATE_DIR: /state
+    volumes:
+      - shop_assistant_state:/state
+      - type: bind
+        source: ${HU12_TELEGRAM_TOKEN_FILE:-${HOME}/.config/paso-firme/secrets/hu12-telegram-token}
+        target: /run/secrets/hu12-telegram-token
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HU12_BRIDGE_KEY_FILE:-${HOME}/.config/paso-firme/secrets/hu12-bridge-key}
+        target: /run/secrets/hu12-bridge-key
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 45s
+    restart: "no"
+volumes:
+  shop_assistant_state:

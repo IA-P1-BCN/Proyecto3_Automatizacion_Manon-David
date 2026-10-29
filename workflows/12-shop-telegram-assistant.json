@@ -1,0 +1,820 @@
+{
+  "name": "12 Shop Telegram Assistant",
+  "active": false,
+  "nodes": [
+    {
+      "id": "shop-assistant-1",
+      "name": "Manual Safe Preview",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "shop-assistant-2",
+      "name": "Show Synthetic Weekly Example",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nreturn [{json:shopFixture()}];"
+      }
+    },
+    {
+      "id": "shop-assistant-3",
+      "name": "Receive Private Shop Question",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hu12-shop-assistant",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-4",
+      "name": "Configure Owner and Effects",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "owner-user",
+              "name": "owner_user_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "owner-chat",
+              "name": "owner_chat_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "ai",
+              "name": "allow_external_ai",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "reads",
+              "name": "allow_shop_reads",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-5",
+      "name": "Validate Owner and Question",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nconst cfg=$input.first().json;\nconst incoming=$('Receive Private Shop Question').first().json.body;\nconst prepared=shopPrepare(incoming,cfg,$now.toISO());\nreturn [{json:prepared}];"
+      }
+    },
+    {
+      "id": "shop-assistant-6",
+      "name": "Authorized Query and Effects Enabled",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        304
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Authorized-Query-and-Effects-Enabled",
+              "leftValue": "={{ $json.status === 'interpret' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-7",
+      "name": "Interpret Supported Shop Question",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        -192
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Validate Owner and Question').first().json.canonical_query }}",
+        "hasOutputParser": false,
+        "needsFallback": false,
+        "options": {
+          "systemMessage": "Select exactly one closed query plan. The input is a validated JSON object with question weekly_collections or monthly_deadlines. For weekly_collections call Choose_Weekly_Collections_Plan once with {\"intent\":\"weekly_collections\"}. For monthly_deadlines call Choose_Monthly_Deadlines_Plan once with {\"intent\":\"monthly_deadlines\"}. After the tool, return only its JSON object with the single key intent. Do not invent fields, dates, URLs, amounts or prose. No other task is supported.",
+          "maxIterations": 2,
+          "returnIntermediateSteps": true,
+          "passthroughBinaryImages": false,
+          "passthroughBinaryPdfs": false,
+          "enableStreaming": false,
+          "autoSaveHighlightedData": false
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "shop-assistant-8",
+      "name": "Groq Shop Query Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        944,
+        80
+      ],
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "maxTokensToSample": 512,
+          "temperature": 0
+        }
+      }
+    },
+    {
+      "id": "shop-assistant-9",
+      "name": "Choose Weekly Collections Plan",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        64
+      ],
+      "parameters": {
+        "description": "Select only weekly_collections; returns a closed plan descriptor, no data and no API access.",
+        "language": "javaScript",
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"intent\":{\"type\":\"string\",\"enum\":[\"weekly_collections\"]}},\"required\":[\"intent\"],\"additionalProperties\":false}",
+        "jsCode": "if (!query || Object.keys(query).length!==1 || query.intent!==\"weekly_collections\") throw new Error('HU12_TOOL_ARGUMENTS');\nreturn JSON.stringify({intent:\"weekly_collections\"});"
+      }
+    },
+    {
+      "id": "shop-assistant-10",
+      "name": "Choose Monthly Deadlines Plan",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        1328,
+        64
+      ],
+      "parameters": {
+        "description": "Select only monthly_deadlines; returns a closed plan descriptor, no data and no API access.",
+        "language": "javaScript",
+        "specifyInputSchema": true,
+        "schemaType": "manual",
+        "inputSchema": "{\"type\":\"object\",\"properties\":{\"intent\":{\"type\":\"string\",\"enum\":[\"monthly_deadlines\"]}},\"required\":[\"intent\"],\"additionalProperties\":false}",
+        "jsCode": "if (!query || Object.keys(query).length!==1 || query.intent!==\"monthly_deadlines\") throw new Error('HU12_TOOL_ARGUMENTS');\nreturn JSON.stringify({intent:\"monthly_deadlines\"});"
+      }
+    },
+    {
+      "id": "shop-assistant-11",
+      "name": "Verify Closed Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        -192
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nconst prepared=$('Validate Owner and Question').first().json;\ntry { return [{json:{approved:true,...shopValidatePlan($input.first().json,prepared)}}]; }\ncatch (_) { return [{json:{approved:false,failed:true,...shopReply(prepared.request_id,'unavailable',[SHOP_UNAVAILABLE])}}]; }"
+      }
+    },
+    {
+      "id": "shop-assistant-12",
+      "name": "Plan Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1456,
+        -176
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Plan-Approved",
+              "leftValue": "={{ $json.approved === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-13",
+      "name": "Weekly Collections Selected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1712,
+        -272
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Weekly-Collections-Selected",
+              "leftValue": "={{ $json.intent === 'weekly_collections' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-14",
+      "name": "Fetch Weekly Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1952,
+        -288
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/ventas",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Verify Closed Plan').first().json.desde }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Verify Closed Plan').first().json.hasta }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500
+    },
+    {
+      "id": "shop-assistant-15",
+      "name": "Fetch Weekly Deposits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2192,
+        -288
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/abonos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Verify Closed Plan').first().json.desde }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Verify Closed Plan').first().json.hasta }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500
+    },
+    {
+      "id": "shop-assistant-16",
+      "name": "Fetch Active Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        192
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "estado",
+              "value": "activo"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500
+    },
+    {
+      "id": "shop-assistant-17",
+      "name": "Verify and Render Weekly Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        -288
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nconst period=$('Verify Closed Plan').first().json;\ntry { const result=shopWeekly(period,$('Fetch Weekly Sales').first().json,$('Fetch Weekly Deposits').first().json);\nreturn [{json:shopReply(period.request_id,'ok',shopRender(result))}]; }\ncatch (_) { return [{json:{failed:true,...shopReply(period.request_id,'unavailable',[SHOP_UNAVAILABLE])}}]; }"
+      }
+    },
+    {
+      "id": "shop-assistant-18",
+      "name": "Verify and Render Monthly Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        192
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nconst period=$('Verify Closed Plan').first().json;\ntry { const result=shopMonthly(period,$('Fetch Active Reservations').first().json);\nreturn [{json:shopReply(period.request_id,'ok',shopRender(result))}]; }\ncatch (_) { return [{json:{failed:true,...shopReply(period.request_id,'unavailable',[SHOP_UNAVAILABLE])}}]; }"
+      }
+    },
+    {
+      "id": "shop-assistant-19",
+      "name": "Return Bridge Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nconst input=$input.first().json;\nconst reply=shopReply(input.request_id,input.status,input.messages || []);\nreturn [{json:{...reply,failed:input.failed===true}}];"
+      }
+    },
+    {
+      "id": "shop-assistant-20",
+      "name": "Respond to Local Bridge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2912,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { request_id: $json.request_id, status: $json.status, messages: $json.messages } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "shop-assistant-21",
+      "name": "Required Verification Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3152,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Required-Verification-Failed",
+              "leftValue": "={{ $json.failed === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "shop-assistant-22",
+      "name": "Raise Sanitized Assistant Failure",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        3392,
+        -112
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "HU12: no se pudieron verificar la selección de consulta o los datos necesarios. No se ha emitido un resultado financiero."
+      }
+    },
+    {
+      "id": "shop-assistant-23",
+      "name": "Isolate Model Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// HU-12 pure boundary/rubric. No network, credentials, persistence or business writes.\nconst SHOP_INTENTS = ['weekly_collections', 'monthly_deadlines'];\nconst SHOP_HELP = 'Puedo responder a estas dos preguntas:\\n1. ¿Cuánto se ha recaudado esta semana?\\n2. ¿Qué apartados vencen este mes?';\nconst SHOP_UNAVAILABLE = 'No puedo verificar los datos ahora. Inténtalo de nuevo más tarde.';\nconst SHOP_LIMIT = 'La lista completa supera el límite seguro del chat. Consulta los apartados en la aplicación.';\n\nfunction shopRequire(ok, code) { if (!ok) throw new Error(`HU12_${code}`); }\nfunction shopObject(value, keys) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value)\n    && Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));\n}\nfunction shopId(value) { return Number.isSafeInteger(value) && value > 0; }\nfunction shopConfiguredId(value) {\n  return typeof value === 'string' && /^[1-9]\\d{0,15}$/.test(value) && shopId(Number(value)) ? Number(value) : null;\n}\nfunction shopDate(value) {\n  shopRequire(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value), 'DATE');\n  const d = new Date(`${value}T00:00:00Z`);\n  shopRequire(Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value && value >= '1900-01-01', 'DATE');\n  return value;\n}\nfunction shopMadridDate(now) {\n  const instant = new Date(now);\n  shopRequire(Number.isFinite(instant.getTime()), 'CLOCK');\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Madrid', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(instant).map(x => [x.type,x.value]));\n  return shopDate(`${p.year}-${p.month}-${p.day}`);\n}\nfunction shopPeriod(intent, today) {\n  shopRequire(SHOP_INTENTS.includes(intent), 'INTENT'); shopDate(today);\n  const d = new Date(`${today}T00:00:00Z`);\n  if (intent === 'weekly_collections') {\n    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);\n    return {intent, today, desde:d.toISOString().slice(0,10), hasta:today};\n  }\n  const [year,month] = today.split('-').map(Number);\n  return {intent, today, desde:`${today.slice(0,7)}-01`, hasta:`${today.slice(0,7)}-${new Date(Date.UTC(year,month,0)).getUTCDate()}`};\n}\nfunction shopAuthorize(body, config, now) {\n  const fail = {authorized:false, status:'ignored', request_id:'rejected'};\n  const user = shopConfiguredId(config?.owner_user_id), chat = shopConfiguredId(config?.owner_chat_id);\n  if (!user || !chat || !shopObject(body, ['request_id','update']) || !/^[a-z0-9_-]{8,64}$/.test(body.request_id)) return fail;\n  const u = body.update;\n  if (!shopObject(u,['update_id','message']) || !Number.isSafeInteger(u.update_id) || u.update_id < 0) return fail;\n  const m = u.message;\n  if (!shopObject(m,['message_id','date','from','chat','text']) || !shopId(m.message_id)\n      || !shopObject(m.from,['id','is_bot']) || m.from.id !== user || m.from.is_bot !== false\n      || !shopObject(m.chat,['id','type']) || m.chat.id !== chat || m.chat.type !== 'private'\n      || !Number.isSafeInteger(m.date) || typeof m.text !== 'string' || m.text.length > 320 || !m.text.trim()) return fail;\n  const age = new Date(now).getTime()/1000 - m.date;\n  if (!Number.isFinite(age) || age < -30 || age > 300) return fail;\n  return {authorized:true, request_id:body.request_id, text:m.text, today:shopMadridDate(now)};\n}\nfunction shopClassify(text) {\n  if (typeof text !== 'string' || text.length > 320 || /[\\p{Cc}\\p{Cf}]/u.test(text)) return null;\n  // Whole-question allowlist, not a blacklist or word stripping. No raw text leaves here.\n  const q = text.normalize('NFD').replace(/\\p{M}/gu,'').toLowerCase().trim().replace(/^[¿¡]/,'').replace(/[?!.]$/,'').replace(/\\s+/g,' ');\n  const weekly = [\n    'cuanto se ha recaudado esta semana','cuanto hemos cobrado esta semana',\n    'cuanto hemos recaudado esta semana','cuanto se ha cobrado esta semana',\n    'cuanto se recaudo esta semana','cuanto se ha recaudado en esta semana',\n    'dime la recaudacion semanal','recaudacion de esta semana','recaudacion semanal','/semana',\n  ];\n  const due = ['que apartados vencen este mes','que apartados vencen en este mes',\n    'muestrame los apartados que vencen este mes','dime que apartados vencen este mes',\n    'apartados que vencen este mes','/vencimientos'];\n  return weekly.includes(q) ? 'weekly_collections' : due.includes(q) ? 'monthly_deadlines' : null;\n}\nfunction shopPrepare(body, config, now) {\n  const auth = shopAuthorize(body,config,now);\n  if (!auth.authorized) return {...auth, messages:[]};\n  const intent = shopClassify(auth.text);\n  const base = {authorized:true, request_id:auth.request_id, today:auth.today};\n  if (!intent) return {...base, status:'help', messages:[SHOP_HELP]};\n  if (config.allow_external_ai !== true || config.allow_shop_reads !== true) return {...base,status:'disabled',messages:[]};\n  return {...base,status:'interpret',expected_intent:intent,canonical_query:JSON.stringify({question:intent})};\n}\nfunction shopValidatePlan(agent, prepared) {\n  shopRequire(prepared?.authorized === true && prepared.status === 'interpret' && SHOP_INTENTS.includes(prepared.expected_intent), 'PLAN_CONTEXT');\n  const parsed = typeof agent?.output === 'string' ? JSON.parse(agent.output) : agent?.output;\n  shopRequire(shopObject(parsed,['intent']) && parsed.intent === prepared.expected_intent, 'MODEL_OUTPUT');\n  const steps = agent.intermediateSteps;\n  shopRequire(Array.isArray(steps) && steps.length === 1, 'TOOL_COUNT');\n  const step = steps[0], tool = parsed.intent === 'weekly_collections' ? 'Choose_Weekly_Collections_Plan' : 'Choose_Monthly_Deadlines_Plan';\n  shopRequire(step?.action?.tool === tool && shopObject(step.action.toolInput,['intent']) && step.action.toolInput.intent === parsed.intent, 'TOOL_INPUT');\n  const observation = JSON.parse(step.observation);\n  shopRequire(shopObject(observation,['intent']) && observation.intent === parsed.intent, 'TOOL_RESULT');\n  return {...shopPeriod(parsed.intent,prepared.today), request_id:prepared.request_id};\n}\nfunction shopCents(value, positive = false) {\n  shopRequire(['number','string'].includes(typeof value) && /^\\d+(?:\\.\\d{1,2})?$/.test(String(value)), 'AMOUNT');\n  const [whole, fraction=''] = String(value).split('.');\n  const n = Number(whole)*100 + Number(fraction.padEnd(2,'0'));\n  shopRequire(Number.isSafeInteger(n) && n >= 0 && (!positive || n > 0), 'AMOUNT'); return n;\n}\nfunction shopAdd(a,b) { const sum=a+b; shopRequire(Number.isSafeInteger(sum),'OVERFLOW'); return sum; }\nfunction shopResponse(response, requireCount = false) {\n  shopRequire(response?.statusCode === 200 && Array.isArray(response.body), 'API_RESPONSE');\n  shopRequire(response.body.length <= 10000 && Buffer.byteLength(JSON.stringify(response.body),'utf8') <= 5*1024*1024, 'API_LIMIT');\n  const count = Object.entries(response.headers || {}).find(([k])=>k.toLowerCase()==='x-total-count')?.[1];\n  shopRequire((!requireCount || count !== undefined) && (count === undefined || (/^\\d+$/.test(String(count)) && Number(count)===response.body.length)), 'API_COUNT');\n  const seen = new Set();\n  for (const row of response.body) {\n    shopRequire(row && shopId(row.id) && !seen.has(row.id), 'API_ID'); seen.add(row.id);\n  }\n  return response.body;\n}\nfunction shopCheckPeriod(period) {\n  const expected = shopPeriod(period?.intent,period?.today);\n  shopRequire(period.desde===expected.desde && period.hasta===expected.hasta,'PERIOD');\n}\nfunction shopWeekly(period, salesResponse, depositsResponse) {\n  shopCheckPeriod(period); shopRequire(period.intent==='weekly_collections','INTENT');\n  const lists = [shopResponse(salesResponse,true),shopResponse(depositsResponse)];\n  const sums = lists.map((list,index)=>list.reduce((sum,row)=>{\n    shopDate(row.fecha); shopRequire(row.fecha>=period.desde && row.fecha<=period.hasta,'RECORD_PERIOD');\n    shopRequire(typeof row.forma_pago==='string' && row.forma_pago.trim().length>0,'METHOD');\n    if (index===1) shopRequire(shopId(row.apartado_id),'RESERVATION_ID');\n    return shopAdd(sum,shopCents(row.importe,true));\n  },0));\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,sales_cents:sums[0],deposits_cents:sums[1],total_cents:shopAdd(...sums),movement_count:lists[0].length+lists[1].length};\n}\nfunction shopField(value, required = true) {\n  shopRequire(typeof value==='string' || (!required && (value===null || value===undefined)), 'FIELD');\n  let text=String(value ?? '').normalize('NFC').replace(/[\\p{Cc}\\p{Cf}]/gu,' ').replace(/\\s+/g,' ').trim();\n  shopRequire(!required || text.length>0,'FIELD');\n  // Plain text (no Telegram parse mode); break URL auto-linking in untrusted fields.\n  text=text.replace(/:\\/\\//g, ': / /').replace(/\\./g,'·').replace(/@/g,'[arroba]');\n  return text.length>160 ? Array.from(text).slice(0,140).join('')+'… [texto abreviado]' : text || 'Sin indicar';\n}\nfunction shopMonthly(period, response) {\n  shopCheckPeriod(period); shopRequire(period.intent==='monthly_deadlines','INTENT');\n  const rows=shopResponse(response,true), selected=[];\n  for (const row of rows) {\n    shopRequire(['activo','liquidado','vencido'].includes(row.estado),'STATE');\n    if (row.estado!=='activo') continue;\n    shopDate(row.fecha_limite);\n    if (row.fecha_limite<period.desde || row.fecha_limite>period.hasta) continue;\n    selected.push({id:row.id,cliente:shopField(row.cliente),producto:shopField(row.producto),talla:shopField(row.talla,false),pending_cents:shopCents(row.pendiente),fecha_limite:row.fecha_limite,overdue:row.fecha_limite<period.today});\n  }\n  selected.sort((a,b)=>a.fecha_limite.localeCompare(b.fecha_limite)||a.id-b.id);\n  return {intent:period.intent,desde:period.desde,hasta:period.hasta,rows:selected};\n}\nfunction shopEuro(cents) {\n  shopRequire(Number.isSafeInteger(cents)&&cents>=0,'AMOUNT');\n  const whole=String(Math.floor(cents/100)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');\n  return `${whole},${String(cents%100).padStart(2,'0')} €`;\n}\nfunction shopHumanDate(value) { return shopDate(value).split('-').reverse().join('/'); }\nfunction shopRender(result) {\n  if (result.intent==='weekly_collections') {\n    shopRequire(result.total_cents===shopAdd(result.sales_cents,result.deposits_cents),'RUBRIC_TOTAL');\n    return [`Recaudación de esta semana\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)\\nVentas directas: ${shopEuro(result.sales_cents)}\\nAbonos de apartados: ${shopEuro(result.deposits_cents)}\\nTotal recaudado: ${shopEuro(result.total_cents)}${result.movement_count===0?'\\nNo hay movimientos registrados en este periodo.':''}`];\n  }\n  shopRequire(result.intent==='monthly_deadlines' && Array.isArray(result.rows),'RUBRIC_INTENT');\n  const heading=`Apartados activos con fecha límite este mes\\nDel ${shopHumanDate(result.desde)} al ${shopHumanDate(result.hasta)} (Europe/Madrid)`;\n  if (!result.rows.length) return [heading+'\\nNo hay apartados activos con fecha límite este mes.'];\n  const records=result.rows.map((r,index)=>`${index+1}. Apartado #${r.id}\\nCliente: ${r.cliente}\\nProducto: ${r.producto} · Talla: ${r.talla}\\nPendiente: ${shopEuro(r.pending_cents)}\\nFecha límite: ${shopHumanDate(r.fecha_limite)}${r.overdue?' · Fuera de plazo':''}`);\n  const chunks=[]; let chunk=heading;\n  for (const record of records) {\n    if ((chunk+'\\n\\n'+record).length>3400) { chunks.push(chunk); chunk=heading; }\n    chunk+='\\n\\n'+record;\n  }\n  chunks.push(chunk);\n  if (chunks.length>10 || chunks.some(s=>s.length>3400)) return [SHOP_LIMIT];\n  return chunks.map((s,i)=>chunks.length>1?s+`\\nParte ${i+1} de ${chunks.length}`:s);\n}\nfunction shopReply(requestId, status, messages) {\n  shopRequire(typeof requestId==='string' && /^[a-z0-9_-]{8,64}$/.test(requestId),'REQUEST_ID');\n  shopRequire(['ok','help','unavailable','disabled','ignored'].includes(status) && Array.isArray(messages) && messages.length<=10 && messages.every(s=>typeof s==='string'&&s.length>0&&s.length<=3500),'REPLY');\n  return {request_id:requestId,status,messages};\n}\nfunction shopFixture() {\n  const period=shopPeriod('weekly_collections','2026-10-28');\n  const response=body=>({statusCode:200,headers:{'x-total-count':String(body.length)},body});\n  const sales=response([{id:1,fecha:'2026-10-26',importe:20,forma_pago:'efectivo'}]);\n  const deposits=response([5,10].map((importe,i)=>({id:i+1,apartado_id:1,fecha:'2026-10-27',importe,forma_pago:'bizum'})));\n  const report=shopWeekly(period,sales,deposits);\n  return {fixture_only:true,external_ai_called:false,shop_read:false,telegram_sent:false,report,messages:shopRender(report)};\n}\nif (typeof module!=='undefined') module.exports={SHOP_HELP,SHOP_UNAVAILABLE,SHOP_LIMIT,SHOP_INTENTS,shopObject,shopId,shopConfiguredId,shopDate,shopMadridDate,shopPeriod,shopAuthorize,shopClassify,shopPrepare,shopValidatePlan,shopCents,shopAdd,shopResponse,shopWeekly,shopMonthly,shopField,shopEuro,shopRender,shopReply,shopFixture};\n\nreturn [{json:{canonical_query:$('Validate Owner and Question').first().json.canonical_query}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Choose Weekly Collections Plan": {
+      "ai_tool": [
+        [
+          {
+            "node": "Interpret Supported Shop Question",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Monthly Deadlines Plan": {
+      "ai_tool": [
+        [
+          {
+            "node": "Interpret Supported Shop Question",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Shop Query Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Interpret Supported Shop Question",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Safe Preview": {
+      "main": [
+        [
+          {
+            "node": "Show Synthetic Weekly Example",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Private Shop Question": {
+      "main": [
+        [
+          {
+            "node": "Configure Owner and Effects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configure Owner and Effects": {
+      "main": [
+        [
+          {
+            "node": "Validate Owner and Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Owner and Question": {
+      "main": [
+        [
+          {
+            "node": "Authorized Query and Effects Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized Query and Effects Enabled": {
+      "main": [
+        [
+          {
+            "node": "Isolate Model Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Bridge Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Isolate Model Input": {
+      "main": [
+        [
+          {
+            "node": "Interpret Supported Shop Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpret Supported Shop Question": {
+      "main": [
+        [
+          {
+            "node": "Verify Closed Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Closed Plan": {
+      "main": [
+        [
+          {
+            "node": "Plan Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Approved": {
+      "main": [
+        [
+          {
+            "node": "Weekly Collections Selected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Bridge Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Collections Selected": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weekly Sales",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Active Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weekly Sales": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weekly Deposits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weekly Deposits": {
+      "main": [
+        [
+          {
+            "node": "Verify and Render Weekly Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Active Reservations": {
+      "main": [
+        [
+          {
+            "node": "Verify and Render Monthly Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify and Render Weekly Reply": {
+      "main": [
+        [
+          {
+            "node": "Return Bridge Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify and Render Monthly Reply": {
+      "main": [
+        [
+          {
+            "node": "Return Bridge Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Bridge Reply": {
+      "main": [
+        [
+          {
+            "node": "Respond to Local Bridge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Local Bridge": {
+      "main": [
+        [
+          {
+            "node": "Required Verification Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Required Verification Failed": {
+      "main": [
+        [
+          {
+            "node": "Raise Sanitized Assistant Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false
+  }
+}

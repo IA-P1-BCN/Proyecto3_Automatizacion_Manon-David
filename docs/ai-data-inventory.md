@@ -20,6 +20,20 @@
 | **Legal basis** | Legitimate interest of the shop in registering the payment it received (art. 6.1.f GDPR), minimised to the notice text. Groq is a processor outside the EU; the Groq account's data-retention setting must be checked before real bank emails are used. |
 | **How to switch it off** | Set `allow_external_ai` to false, or disable the node. Every payment then goes to Marisa for manual review. |
 
+### Flow 12 · Shop Telegram assistant
+
+| | |
+|---|---|
+| **Agent / model nodes** | `Interpret Supported Shop Question`, `Groq Shop Query Model` |
+| **Closed tools** | `Choose Weekly Collections Plan`, `Choose Monthly Deadlines Plan` (return constant plan descriptors, no API access) |
+| **Provider · model** | Groq · `openai/gpt-oss-20b`; both authorized real HU-12 query paths passed on 2026-10-29 (Agent 2.2, n8n 2.32.6); see workflow evidence |
+| **What is sent** | Only constant vocabulary: `{"question":"weekly_collections"}` or `{"question":"monthly_deadlines"}`, fixed system/tool instructions, the selected constant tool argument/result, and final plan enum. No raw user question is forwarded. |
+| **Never sent** | Raw Telegram text, user/chat IDs, names, emails, phones, balances, amounts, deadlines, reservation IDs, API replies, bridge/bot/shop keys or final business replies. |
+| **When it runs** | After bridge authentication, independent numeric owner/private-chat authorization, whole-question validation, and both `allow_external_ai` / `allow_shop_reads` gates. Canonical export gates are false. |
+| **What the model decides** | A closed plan selection which code must independently approve; it cannot call the app or send/compose a business reply. The model cannot broaden scope. |
+| **Basis / privacy boundary** | Only a constant non-personal query representation is sent; customer records are excluded altogether. This does not assess Telegram's handling of the final owner-only business reply: bot chats are not end-to-end encrypted secret chats. |
+| **How to switch it off** | Set `allow_external_ai=false` in `Configure Owner and Effects` or stop the dedicated bridge. No AI/API report is emitted with default gates off. |
+
 ## Flows that send no data to an AI model
 
 Flows 00, 01, 02, 04, 05, 06, 06b, 07, 08, 09, 09b, 10, 90 and 99 contain no AI node. Customer messages are fixed Spanish templates filled with values from the app.
