@@ -18,6 +18,19 @@ Format: 12 minutes (5 demo, 5 questions, 2 feedback). Either of us must be able 
 
 Known soft spots to fix or admit: flow 03 has 14 node names over 60 characters (hard to read on the canvas); the exported JSON in the repo has no *Error Workflow* setting because that ID belongs to each n8n instance, so show it live in n8n.
 
+### Publish order (only if a flow has to be republished)
+
+Do not unpublish and republish everything. n8n refuses to publish a workflow whose sub-workflows are unpublished, and a caller runs the *published* version of its sub-workflow, not the draft. So check each flow for "unpublished changes" and republish in place, callees first:
+
+| Step | Publish | Why this position |
+|---|---|---|
+| 1 | 08 Error Workflow | target of the *Error Workflow* setting on every other flow |
+| 2 | 09 Consent Check | called by 00, 06, 06b (and 11) |
+| 3 | 01, 02, 04 | called by 00 |
+| 4 | 00, 06, 06b | callers; publish last |
+
+Flows 03, 11 and 11b are not part of the demo; if used, publish 11b before 03 (03 calls it) and 09 before 11. After republishing, run one reservation from the demo script as a smoke test.
+
 ## 2. Five-minute demo script
 
 1. **Setup (20 s).** Show `docker compose ps`, the app, and n8n with flows 00, 01, 02 active.
