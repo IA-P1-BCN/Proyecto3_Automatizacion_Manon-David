@@ -1,0 +1,640 @@
+{
+  "id": "pasoFirmeHomeReservations11",
+  "name": "11 Home Reservations",
+  "active": false,
+  "nodes": [
+    {
+      "id": "home-reservations-1",
+      "name": "Request Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "formTitle": "Reserva tus zapatos",
+        "formDescription": "Cuéntanos qué zapatos quieres apartar. Te escribiremos con los pasos para pagar el abono inicial.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Nombre",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Teléfono"
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Modelo",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Botín piel marrón - 89,90 €"
+                  },
+                  {
+                    "option": "Zueco cuero negro - 64,50 €"
+                  },
+                  {
+                    "option": "Mocasín piel azul - 84,50 €"
+                  },
+                  {
+                    "option": "Deportiva blanca - 74,00 €"
+                  },
+                  {
+                    "option": "Sandalia plana beige - 39,90 €"
+                  },
+                  {
+                    "option": "Bota alta negra - 109,00 €"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Talla",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "36"
+                  },
+                  {
+                    "option": "37"
+                  },
+                  {
+                    "option": "38"
+                  },
+                  {
+                    "option": "39"
+                  },
+                  {
+                    "option": "40"
+                  },
+                  {
+                    "option": "41"
+                  },
+                  {
+                    "option": "42"
+                  },
+                  {
+                    "option": "43"
+                  },
+                  {
+                    "option": "44"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Consentimiento",
+              "fieldType": "checkbox",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Acepto que la tienda me escriba sobre mi apartado"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Solicitar",
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "home-reservations-2",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11 · home reservation requests: pure logic, shared by the generator and the tests.\n// The customer only picks a model; the price always comes from this list, never from the form.\n\n// Mock price list. The form dropdown is built from it (optionLabel), so the two cannot drift.\nconst PRODUCTS = [\n  { producto: 'Botín piel marrón', precio: 89.9 },\n  { producto: 'Zueco cuero negro', precio: 64.5 },\n  { producto: 'Mocasín piel azul', precio: 84.5 },\n  { producto: 'Deportiva blanca', precio: 74.0 },\n  { producto: 'Sandalia plana beige', precio: 39.9 },\n  { producto: 'Bota alta negra', precio: 109.0 },\n];\nconst SIZES = [36, 37, 38, 39, 40, 41, 42, 43, 44];\nconst MIN_DEPOSIT = 5; // the app's own rule, only quoted in the customer email; the app is the one that enforces it\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nconst eur = (value) => `${value.toFixed(2).replace('.', ',')} €`;\nconst optionLabel = ({ producto, precio }) => `${producto} - ${eur(precio)}`;\n\n// `form` carries the form fields by key; `consentimiento` is the list of ticked options (empty or missing when unticked).\nfunction validateRequest(form) {\n  const errors = [];\n  const nombre = String(form.nombre || '').trim().replace(/\\s+/g, ' ');\n  const telefono = String(form.telefono || '').trim();\n  const email = String(form.email || '').trim().toLowerCase();\n  const talla = Number(form.talla);\n  const chosen = PRODUCTS.find((item) => optionLabel(item) === String(form.producto || '').trim());\n  const consent = Array.isArray(form.consentimiento) ? form.consentimiento.length > 0 : Boolean(form.consentimiento);\n\n  if (!nombre) errors.push('Escribe tu nombre.');\n  if (!EMAIL_FORMAT.test(email)) errors.push('Escribe un correo electrónico válido.');\n  if (!chosen) errors.push('Elige un modelo de la lista.');\n  if (!SIZES.includes(talla)) errors.push(`La talla debe estar entre ${SIZES[0]} y ${SIZES[SIZES.length - 1]}.`);\n  if (!consent) errors.push('Necesitamos tu permiso para escribirte sobre tu apartado.');\n  if (errors.length) return { valido: false, errores: errors };\n\n  return { valido: true, errores: [], solicitud: { nombre, telefono, email, producto: chosen.producto, talla, precio: chosen.precio } };\n}\n\n// `rows` are the Data Table rows; an empty table shows up as one empty item, so only rows with a ref count.\nconst refNumber = (ref) => Number(String(ref).replace(/^SOL-/, ''));\nfunction nextRef(rows) {\n  const numbers = rows.filter((row) => /^SOL-\\d+$/.test(row && row.ref)).map((row) => refNumber(row.ref));\n  return `SOL-${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`;\n}\n\n// The same customer, model and size still waiting for the deposit is one request, not two.\n// A confirmed or cancelled row never blocks a new request.\nfunction checkDuplicate(solicitud, rows, today) {\n  const same = rows.find((row) => row && row.estado === 'pendiente' && row.email === solicitud.email\n    && row.producto === solicitud.producto && Number(row.talla) === solicitud.talla);\n  if (same) return { duplicado: true, ref: same.ref };\n  const ref = nextRef(rows);\n  return { duplicado: false, ref, row: { ref, ...solicitud, estado: 'pendiente', fecha: today } };\n}\n\n// Emails. Mock wording, to review with Marisa. Amounts come only from the price list.\nfunction shopEmail(row, customerContacted) {\n  return {\n    subject: `Nueva solicitud de apartado ${row.ref}`,\n    body: [\n      'Marisa, hay una nueva solicitud de apartado desde casa.',\n      '',\n      `Referencia: ${row.ref}`,\n      `Cliente: ${row.nombre}`,\n      `Teléfono: ${row.telefono || 'no indicado'}`,\n      `Correo: ${row.email}`,\n      `Modelo: ${row.producto}, talla ${row.talla}`,\n      `Precio: ${eur(row.precio)}`,\n      '',\n      customerContacted\n        ? 'La clienta o el cliente ya sabe cómo pagar el abono inicial. Cuando llegue su Bizum o transferencia, el apartado se creará solo.'\n        : 'No hemos podido escribir a esta persona (no consta su permiso). Contáctala por otro medio.',\n    ].join('\\n'),\n  };\n}\n\nfunction customerEmail(row, paymentInstructions) {\n  const how = String(paymentInstructions || '').trim() || 'Pregunta en la tienda cómo hacer el pago.';\n  return {\n    subject: 'Hemos recibido tu solicitud de apartado',\n    body: [\n      `Hola ${row.nombre},`,\n      '',\n      `Hemos recibido tu solicitud: ${row.producto}, talla ${row.talla}, ${eur(row.precio)}.`,\n      '',\n      `Para confirmarla, haz un Bizum o una transferencia de al menos ${eur(MIN_DEPOSIT)} e indica ${row.ref} como concepto.`,\n      'Tu apartado no será válido hasta que recibamos ese abono.',\n      '',\n      how,\n      '',\n      'Zapatería Paso Firme',\n    ].join('\\n'),\n  };\n}\n\n// Items for the single Send Email node: always the shop, the customer only when flow 09 allowed it.\nfunction planEmails({ row, permitido, shopAddress, paymentInstructions }) {\n  const emails = [{ to: shopAddress, ...shopEmail(row, permitido === true) }];\n  if (permitido === true) emails.push({ to: row.email, ...customerEmail(row, paymentInstructions) });\n  return emails;\n}\n\n// A failed Send Email item carries `error`; fail loudly so flow 08 alerts and the request stays visible in the table.\nfunction verifyEmails(items) {\n  const failed = items.filter((item) => item && item.error).length;\n  if (failed) throw new Error(`No se pudo enviar ${failed} correo(s) de la solicitud. La solicitud sigue guardada como pendiente.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { PRODUCTS, SIZES, optionLabel, validateRequest, nextRef, checkDuplicate, shopEmail, customerEmail, planEmails, verifyEmails };\n}\n\nconst form = $input.first().json;\nreturn [{json: validateRequest({\n  nombre: form['Nombre'], telefono: form['Teléfono'], email: form['Email'],\n  producto: form['Modelo'], talla: form['Talla'], consentimiento: form['Consentimiento'],\n})}];"
+      }
+    },
+    {
+      "id": "home-reservations-3",
+      "name": "Is Request Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "home-reservations-4",
+      "name": "Show Errors",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Revisa tu solicitud",
+        "completionMessage": "={{ $json.errores.join('<br>') }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "home-reservations-5",
+      "name": "Read Requests",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "home-reservations-6",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11 · home reservation requests: pure logic, shared by the generator and the tests.\n// The customer only picks a model; the price always comes from this list, never from the form.\n\n// Mock price list. The form dropdown is built from it (optionLabel), so the two cannot drift.\nconst PRODUCTS = [\n  { producto: 'Botín piel marrón', precio: 89.9 },\n  { producto: 'Zueco cuero negro', precio: 64.5 },\n  { producto: 'Mocasín piel azul', precio: 84.5 },\n  { producto: 'Deportiva blanca', precio: 74.0 },\n  { producto: 'Sandalia plana beige', precio: 39.9 },\n  { producto: 'Bota alta negra', precio: 109.0 },\n];\nconst SIZES = [36, 37, 38, 39, 40, 41, 42, 43, 44];\nconst MIN_DEPOSIT = 5; // the app's own rule, only quoted in the customer email; the app is the one that enforces it\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nconst eur = (value) => `${value.toFixed(2).replace('.', ',')} €`;\nconst optionLabel = ({ producto, precio }) => `${producto} - ${eur(precio)}`;\n\n// `form` carries the form fields by key; `consentimiento` is the list of ticked options (empty or missing when unticked).\nfunction validateRequest(form) {\n  const errors = [];\n  const nombre = String(form.nombre || '').trim().replace(/\\s+/g, ' ');\n  const telefono = String(form.telefono || '').trim();\n  const email = String(form.email || '').trim().toLowerCase();\n  const talla = Number(form.talla);\n  const chosen = PRODUCTS.find((item) => optionLabel(item) === String(form.producto || '').trim());\n  const consent = Array.isArray(form.consentimiento) ? form.consentimiento.length > 0 : Boolean(form.consentimiento);\n\n  if (!nombre) errors.push('Escribe tu nombre.');\n  if (!EMAIL_FORMAT.test(email)) errors.push('Escribe un correo electrónico válido.');\n  if (!chosen) errors.push('Elige un modelo de la lista.');\n  if (!SIZES.includes(talla)) errors.push(`La talla debe estar entre ${SIZES[0]} y ${SIZES[SIZES.length - 1]}.`);\n  if (!consent) errors.push('Necesitamos tu permiso para escribirte sobre tu apartado.');\n  if (errors.length) return { valido: false, errores: errors };\n\n  return { valido: true, errores: [], solicitud: { nombre, telefono, email, producto: chosen.producto, talla, precio: chosen.precio } };\n}\n\n// `rows` are the Data Table rows; an empty table shows up as one empty item, so only rows with a ref count.\nconst refNumber = (ref) => Number(String(ref).replace(/^SOL-/, ''));\nfunction nextRef(rows) {\n  const numbers = rows.filter((row) => /^SOL-\\d+$/.test(row && row.ref)).map((row) => refNumber(row.ref));\n  return `SOL-${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`;\n}\n\n// The same customer, model and size still waiting for the deposit is one request, not two.\n// A confirmed or cancelled row never blocks a new request.\nfunction checkDuplicate(solicitud, rows, today) {\n  const same = rows.find((row) => row && row.estado === 'pendiente' && row.email === solicitud.email\n    && row.producto === solicitud.producto && Number(row.talla) === solicitud.talla);\n  if (same) return { duplicado: true, ref: same.ref };\n  const ref = nextRef(rows);\n  return { duplicado: false, ref, row: { ref, ...solicitud, estado: 'pendiente', fecha: today } };\n}\n\n// Emails. Mock wording, to review with Marisa. Amounts come only from the price list.\nfunction shopEmail(row, customerContacted) {\n  return {\n    subject: `Nueva solicitud de apartado ${row.ref}`,\n    body: [\n      'Marisa, hay una nueva solicitud de apartado desde casa.',\n      '',\n      `Referencia: ${row.ref}`,\n      `Cliente: ${row.nombre}`,\n      `Teléfono: ${row.telefono || 'no indicado'}`,\n      `Correo: ${row.email}`,\n      `Modelo: ${row.producto}, talla ${row.talla}`,\n      `Precio: ${eur(row.precio)}`,\n      '',\n      customerContacted\n        ? 'La clienta o el cliente ya sabe cómo pagar el abono inicial. Cuando llegue su Bizum o transferencia, el apartado se creará solo.'\n        : 'No hemos podido escribir a esta persona (no consta su permiso). Contáctala por otro medio.',\n    ].join('\\n'),\n  };\n}\n\nfunction customerEmail(row, paymentInstructions) {\n  const how = String(paymentInstructions || '').trim() || 'Pregunta en la tienda cómo hacer el pago.';\n  return {\n    subject: 'Hemos recibido tu solicitud de apartado',\n    body: [\n      `Hola ${row.nombre},`,\n      '',\n      `Hemos recibido tu solicitud: ${row.producto}, talla ${row.talla}, ${eur(row.precio)}.`,\n      '',\n      `Para confirmarla, haz un Bizum o una transferencia de al menos ${eur(MIN_DEPOSIT)} e indica ${row.ref} como concepto.`,\n      'Tu apartado no será válido hasta que recibamos ese abono.',\n      '',\n      how,\n      '',\n      'Zapatería Paso Firme',\n    ].join('\\n'),\n  };\n}\n\n// Items for the single Send Email node: always the shop, the customer only when flow 09 allowed it.\nfunction planEmails({ row, permitido, shopAddress, paymentInstructions }) {\n  const emails = [{ to: shopAddress, ...shopEmail(row, permitido === true) }];\n  if (permitido === true) emails.push({ to: row.email, ...customerEmail(row, paymentInstructions) });\n  return emails;\n}\n\n// A failed Send Email item carries `error`; fail loudly so flow 08 alerts and the request stays visible in the table.\nfunction verifyEmails(items) {\n  const failed = items.filter((item) => item && item.error).length;\n  if (failed) throw new Error(`No se pudo enviar ${failed} correo(s) de la solicitud. La solicitud sigue guardada como pendiente.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { PRODUCTS, SIZES, optionLabel, validateRequest, nextRef, checkDuplicate, shopEmail, customerEmail, planEmails, verifyEmails };\n}\n\nconst solicitud = $('Validate Request').first().json.solicitud;\nconst rows = $input.all().map((item) => item.json);\nreturn [{json: checkDuplicate(solicitud, rows, $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd'))}];"
+      }
+    },
+    {
+      "id": "home-reservations-7",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "duplicate",
+              "leftValue": "={{ $json.duplicado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "home-reservations-8",
+      "name": "Show Duplicate",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1440,
+        200
+      ],
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Ya tenemos tu solicitud",
+        "completionMessage": "={{ 'Tu referencia es ' + $json.ref + '. Usa esa referencia como concepto del pago.' }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "home-reservations-9",
+      "name": "Save Request",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "solicitudes_apartado"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ref": "={{ $json.row.ref }}",
+            "nombre": "={{ $json.row.nombre }}",
+            "telefono": "={{ $json.row.telefono }}",
+            "email": "={{ $json.row.email }}",
+            "producto": "={{ $json.row.producto }}",
+            "talla": "={{ $json.row.talla }}",
+            "precio": "={{ $json.row.precio }}",
+            "estado": "={{ $json.row.estado }}",
+            "fecha": "={{ $json.row.fecha }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ref",
+              "displayName": "ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nombre",
+              "displayName": "nombre",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telefono",
+              "displayName": "telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "producto",
+              "displayName": "producto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "talla",
+              "displayName": "talla",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "precio",
+              "displayName": "precio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "home-reservations-10",
+      "name": "Prepare Consent Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11 · home reservation requests: pure logic, shared by the generator and the tests.\n// The customer only picks a model; the price always comes from this list, never from the form.\n\n// Mock price list. The form dropdown is built from it (optionLabel), so the two cannot drift.\nconst PRODUCTS = [\n  { producto: 'Botín piel marrón', precio: 89.9 },\n  { producto: 'Zueco cuero negro', precio: 64.5 },\n  { producto: 'Mocasín piel azul', precio: 84.5 },\n  { producto: 'Deportiva blanca', precio: 74.0 },\n  { producto: 'Sandalia plana beige', precio: 39.9 },\n  { producto: 'Bota alta negra', precio: 109.0 },\n];\nconst SIZES = [36, 37, 38, 39, 40, 41, 42, 43, 44];\nconst MIN_DEPOSIT = 5; // the app's own rule, only quoted in the customer email; the app is the one that enforces it\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nconst eur = (value) => `${value.toFixed(2).replace('.', ',')} €`;\nconst optionLabel = ({ producto, precio }) => `${producto} - ${eur(precio)}`;\n\n// `form` carries the form fields by key; `consentimiento` is the list of ticked options (empty or missing when unticked).\nfunction validateRequest(form) {\n  const errors = [];\n  const nombre = String(form.nombre || '').trim().replace(/\\s+/g, ' ');\n  const telefono = String(form.telefono || '').trim();\n  const email = String(form.email || '').trim().toLowerCase();\n  const talla = Number(form.talla);\n  const chosen = PRODUCTS.find((item) => optionLabel(item) === String(form.producto || '').trim());\n  const consent = Array.isArray(form.consentimiento) ? form.consentimiento.length > 0 : Boolean(form.consentimiento);\n\n  if (!nombre) errors.push('Escribe tu nombre.');\n  if (!EMAIL_FORMAT.test(email)) errors.push('Escribe un correo electrónico válido.');\n  if (!chosen) errors.push('Elige un modelo de la lista.');\n  if (!SIZES.includes(talla)) errors.push(`La talla debe estar entre ${SIZES[0]} y ${SIZES[SIZES.length - 1]}.`);\n  if (!consent) errors.push('Necesitamos tu permiso para escribirte sobre tu apartado.');\n  if (errors.length) return { valido: false, errores: errors };\n\n  return { valido: true, errores: [], solicitud: { nombre, telefono, email, producto: chosen.producto, talla, precio: chosen.precio } };\n}\n\n// `rows` are the Data Table rows; an empty table shows up as one empty item, so only rows with a ref count.\nconst refNumber = (ref) => Number(String(ref).replace(/^SOL-/, ''));\nfunction nextRef(rows) {\n  const numbers = rows.filter((row) => /^SOL-\\d+$/.test(row && row.ref)).map((row) => refNumber(row.ref));\n  return `SOL-${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`;\n}\n\n// The same customer, model and size still waiting for the deposit is one request, not two.\n// A confirmed or cancelled row never blocks a new request.\nfunction checkDuplicate(solicitud, rows, today) {\n  const same = rows.find((row) => row && row.estado === 'pendiente' && row.email === solicitud.email\n    && row.producto === solicitud.producto && Number(row.talla) === solicitud.talla);\n  if (same) return { duplicado: true, ref: same.ref };\n  const ref = nextRef(rows);\n  return { duplicado: false, ref, row: { ref, ...solicitud, estado: 'pendiente', fecha: today } };\n}\n\n// Emails. Mock wording, to review with Marisa. Amounts come only from the price list.\nfunction shopEmail(row, customerContacted) {\n  return {\n    subject: `Nueva solicitud de apartado ${row.ref}`,\n    body: [\n      'Marisa, hay una nueva solicitud de apartado desde casa.',\n      '',\n      `Referencia: ${row.ref}`,\n      `Cliente: ${row.nombre}`,\n      `Teléfono: ${row.telefono || 'no indicado'}`,\n      `Correo: ${row.email}`,\n      `Modelo: ${row.producto}, talla ${row.talla}`,\n      `Precio: ${eur(row.precio)}`,\n      '',\n      customerContacted\n        ? 'La clienta o el cliente ya sabe cómo pagar el abono inicial. Cuando llegue su Bizum o transferencia, el apartado se creará solo.'\n        : 'No hemos podido escribir a esta persona (no consta su permiso). Contáctala por otro medio.',\n    ].join('\\n'),\n  };\n}\n\nfunction customerEmail(row, paymentInstructions) {\n  const how = String(paymentInstructions || '').trim() || 'Pregunta en la tienda cómo hacer el pago.';\n  return {\n    subject: 'Hemos recibido tu solicitud de apartado',\n    body: [\n      `Hola ${row.nombre},`,\n      '',\n      `Hemos recibido tu solicitud: ${row.producto}, talla ${row.talla}, ${eur(row.precio)}.`,\n      '',\n      `Para confirmarla, haz un Bizum o una transferencia de al menos ${eur(MIN_DEPOSIT)} e indica ${row.ref} como concepto.`,\n      'Tu apartado no será válido hasta que recibamos ese abono.',\n      '',\n      how,\n      '',\n      'Zapatería Paso Firme',\n    ].join('\\n'),\n  };\n}\n\n// Items for the single Send Email node: always the shop, the customer only when flow 09 allowed it.\nfunction planEmails({ row, permitido, shopAddress, paymentInstructions }) {\n  const emails = [{ to: shopAddress, ...shopEmail(row, permitido === true) }];\n  if (permitido === true) emails.push({ to: row.email, ...customerEmail(row, paymentInstructions) });\n  return emails;\n}\n\n// A failed Send Email item carries `error`; fail loudly so flow 08 alerts and the request stays visible in the table.\nfunction verifyEmails(items) {\n  const failed = items.filter((item) => item && item.error).length;\n  if (failed) throw new Error(`No se pudo enviar ${failed} correo(s) de la solicitud. La solicitud sigue guardada como pendiente.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { PRODUCTS, SIZES, optionLabel, validateRequest, nextRef, checkDuplicate, shopEmail, customerEmail, planEmails, verifyEmails };\n}\n\nreturn [{json: {email: $('Check Duplicate').first().json.row.email, registrar: true}}];"
+      }
+    },
+    {
+      "id": "home-reservations-11",
+      "name": "Check Consent (flow 09)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "home-reservations-12",
+      "name": "Plan Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11 · home reservation requests: pure logic, shared by the generator and the tests.\n// The customer only picks a model; the price always comes from this list, never from the form.\n\n// Mock price list. The form dropdown is built from it (optionLabel), so the two cannot drift.\nconst PRODUCTS = [\n  { producto: 'Botín piel marrón', precio: 89.9 },\n  { producto: 'Zueco cuero negro', precio: 64.5 },\n  { producto: 'Mocasín piel azul', precio: 84.5 },\n  { producto: 'Deportiva blanca', precio: 74.0 },\n  { producto: 'Sandalia plana beige', precio: 39.9 },\n  { producto: 'Bota alta negra', precio: 109.0 },\n];\nconst SIZES = [36, 37, 38, 39, 40, 41, 42, 43, 44];\nconst MIN_DEPOSIT = 5; // the app's own rule, only quoted in the customer email; the app is the one that enforces it\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nconst eur = (value) => `${value.toFixed(2).replace('.', ',')} €`;\nconst optionLabel = ({ producto, precio }) => `${producto} - ${eur(precio)}`;\n\n// `form` carries the form fields by key; `consentimiento` is the list of ticked options (empty or missing when unticked).\nfunction validateRequest(form) {\n  const errors = [];\n  const nombre = String(form.nombre || '').trim().replace(/\\s+/g, ' ');\n  const telefono = String(form.telefono || '').trim();\n  const email = String(form.email || '').trim().toLowerCase();\n  const talla = Number(form.talla);\n  const chosen = PRODUCTS.find((item) => optionLabel(item) === String(form.producto || '').trim());\n  const consent = Array.isArray(form.consentimiento) ? form.consentimiento.length > 0 : Boolean(form.consentimiento);\n\n  if (!nombre) errors.push('Escribe tu nombre.');\n  if (!EMAIL_FORMAT.test(email)) errors.push('Escribe un correo electrónico válido.');\n  if (!chosen) errors.push('Elige un modelo de la lista.');\n  if (!SIZES.includes(talla)) errors.push(`La talla debe estar entre ${SIZES[0]} y ${SIZES[SIZES.length - 1]}.`);\n  if (!consent) errors.push('Necesitamos tu permiso para escribirte sobre tu apartado.');\n  if (errors.length) return { valido: false, errores: errors };\n\n  return { valido: true, errores: [], solicitud: { nombre, telefono, email, producto: chosen.producto, talla, precio: chosen.precio } };\n}\n\n// `rows` are the Data Table rows; an empty table shows up as one empty item, so only rows with a ref count.\nconst refNumber = (ref) => Number(String(ref).replace(/^SOL-/, ''));\nfunction nextRef(rows) {\n  const numbers = rows.filter((row) => /^SOL-\\d+$/.test(row && row.ref)).map((row) => refNumber(row.ref));\n  return `SOL-${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`;\n}\n\n// The same customer, model and size still waiting for the deposit is one request, not two.\n// A confirmed or cancelled row never blocks a new request.\nfunction checkDuplicate(solicitud, rows, today) {\n  const same = rows.find((row) => row && row.estado === 'pendiente' && row.email === solicitud.email\n    && row.producto === solicitud.producto && Number(row.talla) === solicitud.talla);\n  if (same) return { duplicado: true, ref: same.ref };\n  const ref = nextRef(rows);\n  return { duplicado: false, ref, row: { ref, ...solicitud, estado: 'pendiente', fecha: today } };\n}\n\n// Emails. Mock wording, to review with Marisa. Amounts come only from the price list.\nfunction shopEmail(row, customerContacted) {\n  return {\n    subject: `Nueva solicitud de apartado ${row.ref}`,\n    body: [\n      'Marisa, hay una nueva solicitud de apartado desde casa.',\n      '',\n      `Referencia: ${row.ref}`,\n      `Cliente: ${row.nombre}`,\n      `Teléfono: ${row.telefono || 'no indicado'}`,\n      `Correo: ${row.email}`,\n      `Modelo: ${row.producto}, talla ${row.talla}`,\n      `Precio: ${eur(row.precio)}`,\n      '',\n      customerContacted\n        ? 'La clienta o el cliente ya sabe cómo pagar el abono inicial. Cuando llegue su Bizum o transferencia, el apartado se creará solo.'\n        : 'No hemos podido escribir a esta persona (no consta su permiso). Contáctala por otro medio.',\n    ].join('\\n'),\n  };\n}\n\nfunction customerEmail(row, paymentInstructions) {\n  const how = String(paymentInstructions || '').trim() || 'Pregunta en la tienda cómo hacer el pago.';\n  return {\n    subject: 'Hemos recibido tu solicitud de apartado',\n    body: [\n      `Hola ${row.nombre},`,\n      '',\n      `Hemos recibido tu solicitud: ${row.producto}, talla ${row.talla}, ${eur(row.precio)}.`,\n      '',\n      `Para confirmarla, haz un Bizum o una transferencia de al menos ${eur(MIN_DEPOSIT)} e indica ${row.ref} como concepto.`,\n      'Tu apartado no será válido hasta que recibamos ese abono.',\n      '',\n      how,\n      '',\n      'Zapatería Paso Firme',\n    ].join('\\n'),\n  };\n}\n\n// Items for the single Send Email node: always the shop, the customer only when flow 09 allowed it.\nfunction planEmails({ row, permitido, shopAddress, paymentInstructions }) {\n  const emails = [{ to: shopAddress, ...shopEmail(row, permitido === true) }];\n  if (permitido === true) emails.push({ to: row.email, ...customerEmail(row, paymentInstructions) });\n  return emails;\n}\n\n// A failed Send Email item carries `error`; fail loudly so flow 08 alerts and the request stays visible in the table.\nfunction verifyEmails(items) {\n  const failed = items.filter((item) => item && item.error).length;\n  if (failed) throw new Error(`No se pudo enviar ${failed} correo(s) de la solicitud. La solicitud sigue guardada como pendiente.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { PRODUCTS, SIZES, optionLabel, validateRequest, nextRef, checkDuplicate, shopEmail, customerEmail, planEmails, verifyEmails };\n}\n\nconst shopAddress = String($env.TIENDA_EMAIL_AVISOS || '').trim();\nif (!shopAddress.includes('@')) throw new Error('Configure TIENDA_EMAIL_AVISOS.');\nreturn planEmails({\n  row: $('Check Duplicate').first().json.row, permitido: $input.first().json.permitido === true,\n  shopAddress, paymentInstructions: $env.TIENDA_PAGO_INSTRUCCIONES,\n}).map((json) => ({json}));"
+      }
+    },
+    {
+      "id": "home-reservations-13",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "home-reservations-14",
+      "name": "Verify Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 11 · home reservation requests: pure logic, shared by the generator and the tests.\n// The customer only picks a model; the price always comes from this list, never from the form.\n\n// Mock price list. The form dropdown is built from it (optionLabel), so the two cannot drift.\nconst PRODUCTS = [\n  { producto: 'Botín piel marrón', precio: 89.9 },\n  { producto: 'Zueco cuero negro', precio: 64.5 },\n  { producto: 'Mocasín piel azul', precio: 84.5 },\n  { producto: 'Deportiva blanca', precio: 74.0 },\n  { producto: 'Sandalia plana beige', precio: 39.9 },\n  { producto: 'Bota alta negra', precio: 109.0 },\n];\nconst SIZES = [36, 37, 38, 39, 40, 41, 42, 43, 44];\nconst MIN_DEPOSIT = 5; // the app's own rule, only quoted in the customer email; the app is the one that enforces it\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nconst eur = (value) => `${value.toFixed(2).replace('.', ',')} €`;\nconst optionLabel = ({ producto, precio }) => `${producto} - ${eur(precio)}`;\n\n// `form` carries the form fields by key; `consentimiento` is the list of ticked options (empty or missing when unticked).\nfunction validateRequest(form) {\n  const errors = [];\n  const nombre = String(form.nombre || '').trim().replace(/\\s+/g, ' ');\n  const telefono = String(form.telefono || '').trim();\n  const email = String(form.email || '').trim().toLowerCase();\n  const talla = Number(form.talla);\n  const chosen = PRODUCTS.find((item) => optionLabel(item) === String(form.producto || '').trim());\n  const consent = Array.isArray(form.consentimiento) ? form.consentimiento.length > 0 : Boolean(form.consentimiento);\n\n  if (!nombre) errors.push('Escribe tu nombre.');\n  if (!EMAIL_FORMAT.test(email)) errors.push('Escribe un correo electrónico válido.');\n  if (!chosen) errors.push('Elige un modelo de la lista.');\n  if (!SIZES.includes(talla)) errors.push(`La talla debe estar entre ${SIZES[0]} y ${SIZES[SIZES.length - 1]}.`);\n  if (!consent) errors.push('Necesitamos tu permiso para escribirte sobre tu apartado.');\n  if (errors.length) return { valido: false, errores: errors };\n\n  return { valido: true, errores: [], solicitud: { nombre, telefono, email, producto: chosen.producto, talla, precio: chosen.precio } };\n}\n\n// `rows` are the Data Table rows; an empty table shows up as one empty item, so only rows with a ref count.\nconst refNumber = (ref) => Number(String(ref).replace(/^SOL-/, ''));\nfunction nextRef(rows) {\n  const numbers = rows.filter((row) => /^SOL-\\d+$/.test(row && row.ref)).map((row) => refNumber(row.ref));\n  return `SOL-${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`;\n}\n\n// The same customer, model and size still waiting for the deposit is one request, not two.\n// A confirmed or cancelled row never blocks a new request.\nfunction checkDuplicate(solicitud, rows, today) {\n  const same = rows.find((row) => row && row.estado === 'pendiente' && row.email === solicitud.email\n    && row.producto === solicitud.producto && Number(row.talla) === solicitud.talla);\n  if (same) return { duplicado: true, ref: same.ref };\n  const ref = nextRef(rows);\n  return { duplicado: false, ref, row: { ref, ...solicitud, estado: 'pendiente', fecha: today } };\n}\n\n// Emails. Mock wording, to review with Marisa. Amounts come only from the price list.\nfunction shopEmail(row, customerContacted) {\n  return {\n    subject: `Nueva solicitud de apartado ${row.ref}`,\n    body: [\n      'Marisa, hay una nueva solicitud de apartado desde casa.',\n      '',\n      `Referencia: ${row.ref}`,\n      `Cliente: ${row.nombre}`,\n      `Teléfono: ${row.telefono || 'no indicado'}`,\n      `Correo: ${row.email}`,\n      `Modelo: ${row.producto}, talla ${row.talla}`,\n      `Precio: ${eur(row.precio)}`,\n      '',\n      customerContacted\n        ? 'La clienta o el cliente ya sabe cómo pagar el abono inicial. Cuando llegue su Bizum o transferencia, el apartado se creará solo.'\n        : 'No hemos podido escribir a esta persona (no consta su permiso). Contáctala por otro medio.',\n    ].join('\\n'),\n  };\n}\n\nfunction customerEmail(row, paymentInstructions) {\n  const how = String(paymentInstructions || '').trim() || 'Pregunta en la tienda cómo hacer el pago.';\n  return {\n    subject: 'Hemos recibido tu solicitud de apartado',\n    body: [\n      `Hola ${row.nombre},`,\n      '',\n      `Hemos recibido tu solicitud: ${row.producto}, talla ${row.talla}, ${eur(row.precio)}.`,\n      '',\n      `Para confirmarla, haz un Bizum o una transferencia de al menos ${eur(MIN_DEPOSIT)} e indica ${row.ref} como concepto.`,\n      'Tu apartado no será válido hasta que recibamos ese abono.',\n      '',\n      how,\n      '',\n      'Zapatería Paso Firme',\n    ].join('\\n'),\n  };\n}\n\n// Items for the single Send Email node: always the shop, the customer only when flow 09 allowed it.\nfunction planEmails({ row, permitido, shopAddress, paymentInstructions }) {\n  const emails = [{ to: shopAddress, ...shopEmail(row, permitido === true) }];\n  if (permitido === true) emails.push({ to: row.email, ...customerEmail(row, paymentInstructions) });\n  return emails;\n}\n\n// A failed Send Email item carries `error`; fail loudly so flow 08 alerts and the request stays visible in the table.\nfunction verifyEmails(items) {\n  const failed = items.filter((item) => item && item.error).length;\n  if (failed) throw new Error(`No se pudo enviar ${failed} correo(s) de la solicitud. La solicitud sigue guardada como pendiente.`);\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { PRODUCTS, SIZES, optionLabel, validateRequest, nextRef, checkDuplicate, shopEmail, customerEmail, planEmails, verifyEmails };\n}\n\nverifyEmails($input.all().map((item) => item.json));\nreturn [{json: {ref: $('Check Duplicate').first().json.ref}}];"
+      }
+    },
+    {
+      "id": "home-reservations-15",
+      "name": "Show Result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Solicitud recibida",
+        "completionMessage": "={{ 'Tu referencia es ' + $json.ref + '. Te hemos escrito con los pasos para pagar el abono inicial.' }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Request Form": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Is Request Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Request Valid?": {
+      "main": [
+        [
+          {
+            "node": "Read Requests",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Requests": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Show Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Consent Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Consent Check": {
+      "main": [
+        [
+          {
+            "node": "Check Consent (flow 09)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Consent (flow 09)": {
+      "main": [
+        [
+          {
+            "node": "Plan Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Verify Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Emails": {
+      "main": [
+        [
+          {
+            "node": "Show Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

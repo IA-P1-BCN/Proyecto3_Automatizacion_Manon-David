@@ -36,7 +36,9 @@
 
 ## Flows that send no data to an AI model
 
-Flows 00, 01, 02, 04, 05, 06, 06b, 07, 08, 09, 09b, 10, 90 and 99 contain no AI node. Customer messages are fixed Spanish templates filled with values from the app.
+Flows 00, 01, 02, 04, 05, 06, 06b, 07, 08, 09, 09b, 10, 11, 11b, 90 and 99 contain no AI node. Customer messages are fixed Spanish templates filled with values from the app.
+
+Flow 11b runs after flow 03's extraction and only reads what flow 03 already holds (payer, amount and concept of one payment) plus the Data Table `solicitudes_apartado` and the app's active reservations. None of that is sent to a model. Flow 11 keeps a customer's name, phone, email, model and size in that Data Table until the request is settled or cancelled, and emails only the customer and the shop.
 
 ## Before adding an AI node
 

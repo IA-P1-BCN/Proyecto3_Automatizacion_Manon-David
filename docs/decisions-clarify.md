@@ -193,6 +193,7 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 | #21 Prueba y evidencias de ejecución | execution evidence | David | `docs/21-execution-evidence` |
 | #32 Event router (single webhook, routes app events to flows 01 and 02) | `add-event-router` | Manon | `feat/32-event-router` |
 | #7 HU-07 · Apartados vencidos con su vale | 06b · `add-expired-reservations` | Manon | `feat/7-expired-reservations` |
+| #13 HU-13 · Entrada automática de datos | 11 and 11b · `add-home-reservations` (plus a hook in flow 03) | Manon (the flow 03 hook needs David's agreement) | `feat/13-home-reservations` |
 
 **Why:** one convention for both agents and for the issue-closing automation (`Closes #N` only closes issues when merged into `dev`).
 
@@ -343,3 +344,20 @@ Refines "How a payment finds its reservation (flow 3)". Found while writing the 
 **Decision:** `docs/ai-data-inventory.md` lists every AI node, what it receives and what it never receives. A unit test fails when an exported flow has an AI node that the inventory does not name.
 
 **Why:** a document alone drifts; the test keeps it honest. The test checks that the node is declared, not what data flows into it, which stays a review item.
+
+## Home reservations from the web (HU-13, option A)
+2026-10-29 (David agreed to the flow 03 hook on 2026-10-29)
+
+**Decision:**
+- HU-13 is covered by its first option only (*apartados desde casa*). The card-terminal CSV is out of scope.
+- The customer asks through an n8n **Form Trigger** (no Telegram). The model comes from a **fixed price list in the flow**; the customer never types a price. The request waits in the Data Table `solicitudes_apartado` (`ref` as `SOL-0001`, customer data, `producto`, `talla`, `precio`, `estado`, `apartado_id`, `fecha`, `payment_key`).
+- The apartado is created **when the matching payment arrives**, not by a person: a new sub-workflow `11b Match Pending Request` decides, claims the row, calls `POST /api/apartados` with the paid amount as `abono_inicial` and updates the row. Flow 01 sends the confirmation because the app emits `apartado.creado`.
+- Matching: a `SOL-…` reference in the concept makes that request the only candidate (the payer must fit its name). Without it, only one pending request fitting the full payer name and **no active reservation fitting it** is accepted; abbreviated payers need the reference. Anything else goes to Marisa.
+- Flow 03 gets a hook of three nodes (Execute Workflow, Switch, NoOp) **before** `Keep Bank Notice Context…`; `not_mine` leaves every existing payment untouched, anything unexpected goes to the existing review email.
+- Consent goes through flow 09 (`registrar`); its origin is `tienda` because flow 09 takes no origin.
+
+**Why:** the app refuses an apartado without a deposit, and the README confirms the reservation when the deposit arrives, so the payment must create it. Doing it in a sub-workflow keeps the edit to flow 03 small and testable.
+
+**Rejected:** a confirmation form for Marisa (the extra manual step was too costly); a second flow reading the same mailbox (a payment could be processed twice); price typed by the customer (untrusted amount); name-only matching without the reservation guard (could take a payment that belongs to an existing apartado).
+
+**Agreement:** David, who owns flow 03, agreed on 2026-10-29 to the three-node hook, because the project rules say not to touch a partner's files. He reviews the PR that changes `workflows/03-remote-deposits.json`.

@@ -11,10 +11,10 @@
       "name": "Receive Bank Payment Notices from Shop Mailbox",
       "type": "n8n-nodes-base.emailReadImap",
       "typeVersion": 2.2,
-      "id": "897fd7ae-b9ac-44cd-850f-5bf6c0d6370b",
+      "id": "ce10f427-35fa-4679-8875-61eb3d30578d",
       "position": [
-        -176,
-        480
+        448,
+        320
       ]
     },
     {
@@ -71,10 +71,10 @@
       "name": "Configure Authorized Test Sender and Groq Access",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "id": "454c8ba6-7b56-4c22-bc1c-93f4e1f46214",
+      "id": "957e2e7d-bc46-44c9-ba10-9cfd08713ed4",
       "position": [
-        48,
-        480
+        672,
+        320
       ]
     },
     {
@@ -84,10 +84,10 @@
       "name": "Apply Configured Test Sender Only to Manually Injected Notices",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "8f863882-94b9-404a-9b76-b5fa73a6ed27",
+      "id": "15841b1a-761c-4175-87f5-6e3ec4fc6951",
       "position": [
-        256,
-        480
+        880,
+        320
       ]
     },
     {
@@ -128,10 +128,10 @@
       "name": "Allow Only Authorized HU03 Test Emails",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "756eb5e0-e18a-4001-b747-151a5ce99e13",
+      "id": "6b926f51-5a95-491e-9ec8-8c0022f61c51",
       "position": [
-        480,
-        480
+        1104,
+        320
       ]
     },
     {
@@ -141,10 +141,10 @@
       "name": "Prepare and Validate Bank Notice Details for Payment Review",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "cbd634b7-66c7-41c7-ab79-04ec9a63c290",
+      "id": "6d54eeda-2e31-495e-aa86-445fad50e89c",
       "position": [
-        736,
-        416
+        1360,
+        256
       ]
     },
     {
@@ -156,10 +156,10 @@
       "name": "Create Stable Payment Key from Mailbox and Message Identifier",
       "type": "n8n-nodes-base.crypto",
       "typeVersion": 1,
-      "id": "c476158a-81ee-4891-8099-a9e0010555c2",
+      "id": "4a4d6a90-2776-4eef-a35f-7ec9fd58dbf4",
       "position": [
-        960,
-        416
+        1584,
+        256
       ]
     },
     {
@@ -171,10 +171,10 @@
       "name": "Fingerprint Notice Content to Flag Duplicate Bank Emails",
       "type": "n8n-nodes-base.crypto",
       "typeVersion": 1,
-      "id": "2f837a99-45af-4bd9-8b12-0f282e4d7892",
+      "id": "6a56a471-2ce5-421c-88f9-4299cc136cf9",
       "position": [
-        1184,
-        416
+        1808,
+        256
       ]
     },
     {
@@ -184,10 +184,10 @@
       "name": "Prepare Minimal Bank Notice Extraction Request for Groq",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "0f2f94a1-8d85-4771-8883-ef4d8ad670d4",
+      "id": "8710b08c-b857-4055-9d69-d2b2e9a60c4f",
       "position": [
-        1408,
-        416
+        2032,
+        256
       ]
     },
     {
@@ -218,10 +218,10 @@
       "name": "Check Whether External AI Extraction Is Explicitly Enabled",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "58f0af31-a459-47e5-9161-8d516f8db41f",
+      "id": "f78c0ce2-1230-421c-a9aa-2c08b773fca5",
       "position": [
-        1648,
-        416
+        2272,
+        256
       ]
     },
     {
@@ -246,10 +246,10 @@
       "name": "Extract Payer Amount and Concept from Bank Notice with Groq",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "id": "b38443cd-d1f6-4f7a-91fa-fe56ec04d6ba",
+      "id": "6df60d81-2c23-4d70-8643-80058d65e421",
       "position": [
-        1840,
-        400
+        2464,
+        240
       ],
       "retryOnFail": false,
       "notesInFlow": true,
@@ -262,10 +262,10 @@
       "name": "Check Extracted Payment Details Against the Original Bank Notice",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "fb4c9a13-51a9-4151-8abb-c6f4558cd097",
+      "id": "8c84ee6c-ea82-4db9-9b40-f56e058e2e08",
       "position": [
-        2048,
-        400
+        2672,
+        240
       ]
     },
     {
@@ -296,10 +296,10 @@
       "name": "Check Whether the Notice Contains a Validated Payment Extraction",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "bfe604bc-a0e6-4b55-9d31-a4a51c9c29d2",
+      "id": "5e1b61ae-5d9d-4c31-96b8-8486cc2eb58d",
       "position": [
-        2240,
-        400
+        2864,
+        240
       ]
     },
     {
@@ -330,10 +330,10 @@
       "name": "Check Whether the Notice Is a Non Payment Email",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "b682568c-51f4-48eb-ba99-98fcd3a3848f",
+      "id": "6ae4e92e-a7d9-4c80-97c7-764b9179f4df",
       "position": [
-        2432,
-        768
+        3056,
+        608
       ]
     },
     {
@@ -341,10 +341,10 @@
       "name": "Ignore Non Payment Notice Without Registering Anything",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "9c879335-fa78-4761-9a34-5443887da67d",
+      "id": "885f16f3-58fe-40a3-8021-6b277540e7ec",
       "position": [
-        2560,
-        544
+        3184,
+        384
       ]
     },
     {
@@ -352,10 +352,10 @@
       "name": "Stop Before External AI Until the User Enables the Test",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "788a579b-f1ff-4518-944f-aa15a3a4148d",
+      "id": "c545554c-d626-4cd8-b6d2-d34c5f861122",
       "position": [
-        1920,
-        752
+        2544,
+        592
       ]
     },
     {
@@ -363,10 +363,10 @@
       "name": "Ignore Email Outside the Authorized HU03 Test Scope",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "aa24db3e-19d7-427d-bb6a-f2006ac76bdb",
+      "id": "a54e34b3-a95f-4e40-9c4f-1100c28ae666",
       "position": [
-        1008,
-        800
+        1632,
+        640
       ]
     },
     {
@@ -374,10 +374,10 @@
       "name": "Keep Bank Notice Context for Reservation Identification",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "0b3ae7c9-5d5f-41cf-bb82-568ae880ac16",
+      "id": "a90b15fd-0cff-4876-880d-da89d337516e",
       "position": [
-        2944,
-        384
+        3568,
+        224
       ]
     },
     {
@@ -398,10 +398,10 @@
       "name": "Fetch All Shop Reservations Without Pagination Truncation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "id": "3a2052fa-84a0-441e-959f-b5504538fc49",
+      "id": "d9744491-1502-41ad-a35f-39dde9df21e6",
       "position": [
-        3184,
-        384
+        3808,
+        224
       ]
     },
     {
@@ -411,10 +411,10 @@
       "name": "Identify the Reservation and Check Its Current Balance and Deadline",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "5a94e1f5-f7ee-4e93-93c4-5ff3e94277ff",
+      "id": "d860e640-d5b4-40f6-99e7-6e6b0ebf58b4",
       "position": [
-        3408,
-        384
+        4032,
+        224
       ]
     },
     {
@@ -445,10 +445,10 @@
       "name": "Check Whether This Payment Has One Clear Eligible Reservation",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "e310f8c7-ec5e-4498-8130-554b8725fcea",
+      "id": "bdf0be94-9dfb-4d34-aca4-469590a9f0e7",
       "position": [
-        3632,
-        384
+        4256,
+        224
       ]
     },
     {
@@ -469,10 +469,10 @@
       "name": "Fetch the Selected Reservation Again Before Any Financial Write",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "id": "ed71e0d5-e6cd-495c-9529-0a849cf82308",
+      "id": "c494fa80-53a1-4338-9e16-3dfb26a5bfeb",
       "position": [
-        3840,
-        384
+        4464,
+        224
       ]
     },
     {
@@ -482,10 +482,10 @@
       "name": "Revalidate the Selected Reservation Without Reassigning the Payment",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "7a429b42-40db-4637-944c-a52d1ddacc10",
+      "id": "dc4c2422-3b8e-4dbc-a550-3408063171b2",
       "position": [
-        4064,
-        384
+        4688,
+        224
       ]
     },
     {
@@ -516,10 +516,10 @@
       "name": "Confirm the Reservation Still Accepts This Payment",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "bcc2a9e0-d8de-4cd6-9edf-66b747caa08f",
+      "id": "a63d4fa5-aaf8-45cb-84ee-1457776e72e5",
       "position": [
-        4288,
-        384
+        4912,
+        224
       ]
     },
     {
@@ -550,10 +550,10 @@
       "name": "Check Whether Payment Registration Is Explicitly Enabled",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "cc0c0b59-267b-4dc0-964d-d08c38c3a22f",
+      "id": "544fdbde-2a4f-4b8c-8206-c8da8055282e",
       "position": [
-        4512,
-        384
+        5136,
+        224
       ]
     },
     {
@@ -561,10 +561,10 @@
       "name": "Show the Proposed Payment Without Writing to the Shop",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "6c6ee0ee-4685-4e15-b7c4-9afd03c7c839",
+      "id": "95e1ec9b-f2ad-47cd-99b4-fc5b58d4ed38",
       "position": [
-        4720,
-        624
+        5344,
+        464
       ]
     },
     {
@@ -585,10 +585,10 @@
       "name": "Check the Installed Shop API Supports Safe Payment Retries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "id": "45565079-2047-42e7-88b4-2e8942a4378b",
+      "id": "ce37e003-de9d-4052-9c8e-9711923a3b37",
       "position": [
-        4720,
-        384
+        5344,
+        224
       ]
     },
     {
@@ -598,10 +598,10 @@
       "name": "Require Installed Duplicate Protection Before Registering Money",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "06301f5a-f301-4cf9-8638-f83716170411",
+      "id": "c47e93b8-9acd-4e95-885d-32ab25a8b5a5",
       "position": [
-        4944,
-        384
+        5568,
+        224
       ]
     },
     {
@@ -640,10 +640,10 @@
       "name": "Register This Bank Payment Once Against the Selected Reservation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "id": "e441f118-6a8b-4ecf-a155-3f9af3099603",
+      "id": "4fc9636f-2bf5-4621-bcbd-7ff3debbf32b",
       "position": [
-        5168,
-        384
+        5792,
+        224
       ],
       "retryOnFail": false,
       "onError": "continueRegularOutput"
@@ -655,10 +655,10 @@
       "name": "Distinguish Confirmed Registration from Rejection or Uncertain Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "2c67d731-3018-42df-a8f4-b99b4d1bac30",
+      "id": "f3afefe2-c20c-41a2-b987-c8ec4a8b12bb",
       "position": [
-        5392,
-        384
+        6016,
+        224
       ]
     },
     {
@@ -689,10 +689,10 @@
       "name": "Check Whether the Shop Confirmed the Payment Registration",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "3b88f636-f331-4872-976e-60ddba647e49",
+      "id": "cb19420f-257e-46db-8901-cefcef5536b9",
       "position": [
-        5600,
-        384
+        6224,
+        224
       ]
     },
     {
@@ -700,10 +700,10 @@
       "name": "Payment Registered Customer Receipt Is Handled Only by HU02",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "id": "938369fa-2bfa-4e8a-a3c0-7da54e8691a9",
+      "id": "0ead6a04-0e9f-4316-b75e-551f36003e47",
       "position": [
-        5824,
-        384
+        6448,
+        224
       ]
     },
     {
@@ -713,10 +713,10 @@
       "name": "Prepare a Spanish Review Notice with Candidate Contact Details",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "293858ca-603b-43b4-9bea-61ea3d9b316b",
+      "id": "f937ee86-7c95-41f1-9971-7fba7003dc94",
       "position": [
-        4064,
-        896
+        4688,
+        736
       ]
     },
     {
@@ -747,10 +747,10 @@
       "name": "Check Whether Shop Review Emails Are Explicitly Enabled",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "id": "aa208236-afaf-435e-9629-aafed215d90e",
+      "id": "db9cd934-adbb-48e0-bf49-861b4525a0b9",
       "position": [
-        4288,
-        896
+        4912,
+        736
       ]
     },
     {
@@ -760,10 +760,10 @@
       "name": "Verify Controlled Shop Email Addresses Before Sending",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "40236608-9841-47e7-9d20-a1429e61b9b1",
+      "id": "bdb1c5af-892c-4850-b680-799ad414dd5c",
       "position": [
-        4512,
-        896
+        5136,
+        736
       ]
     },
     {
@@ -778,10 +778,10 @@
       "name": "Email Marisa the Review Reason and Available Candidate Contacts",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "id": "6526f793-366c-4e21-9728-2ae6e68989ad",
+      "id": "1fa66999-d9a8-473c-999b-bfc95c3ece5c",
       "position": [
-        4720,
-        896
+        5344,
+        736
       ]
     },
     {
@@ -791,10 +791,10 @@
       "name": "Keep the Review Outcome and Escalate Any Uncertain Financial Write",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "2a9216b3-8f7f-4176-86f3-52416dd48e1d",
+      "id": "c8224b42-d811-4767-9755-245791a880d4",
       "position": [
-        4944,
-        896
+        5568,
+        736
       ]
     },
     {
@@ -802,10 +802,10 @@
       "name": "Start One Synthetic Bank Notice Test Without Sending Email",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "id": "f5e4eaef-44f5-48dd-ab27-5cd14452230e",
+      "id": "c92662b0-cf15-4cad-a743-e7ec86074400",
       "position": [
-        -624,
-        160
+        0,
+        0
       ]
     },
     {
@@ -825,10 +825,10 @@
       "name": "Choose Bank Notice Test Case 01 to 09",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "id": "869d4cb4-c86f-4172-b9f7-b9febe7a8b1f",
+      "id": "0877e43a-a015-47d3-bf52-6c9d3df3ab8b",
       "position": [
-        -400,
-        160
+        224,
+        0
       ]
     },
     {
@@ -838,11 +838,119 @@
       "name": "Inject the Selected Example as a Resolved Bank Notice",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "id": "57f0bc4c-66ca-43e4-b2d8-4e9778bd4db9",
+      "id": "53910090-ec0f-4024-9570-b68878407602",
       "position": [
-        -176,
-        160
+        448,
+        0
       ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        3072,
+        -112
+      ],
+      "id": "c2828a17-3951-4cf6-a1ef-5195fd0291f6",
+      "name": "Check Pending Home Request (flow 11b)"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "not_mine",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "54a48caa-607b-4f8c-bb17-7612d294a6d5"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not mine"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "259d18a5-0f93-4750-ae08-b2a54e9f7744",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "created",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "created"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        3232,
+        -128
+      ],
+      "id": "6398fe2e-6a2f-4bde-9d1d-ecd4776ecbb9",
+      "name": "Route Home Request Result"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3184,
+        208
+      ],
+      "id": "d744374e-d9a0-4ee5-9c7f-05143dc5e733",
+      "name": "Apartado Created From Home Request - Receipt Is Handled by Flow 01"
     }
   ],
   "connections": {
@@ -1003,7 +1111,7 @@
       "main": [
         [
           {
-            "node": "Keep Bank Notice Context for Reservation Identification",
+            "node": "Check Pending Home Request (flow 11b)",
             "type": "main",
             "index": 0
           }
@@ -1266,6 +1374,42 @@
         [
           {
             "node": "Configure Authorized Test Sender and Groq Access",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Pending Home Request (flow 11b)": {
+      "main": [
+        [
+          {
+            "node": "Route Home Request Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Home Request Result": {
+      "main": [
+        [
+          {
+            "node": "Keep Bank Notice Context for Reservation Identification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apartado Created From Home Request - Receipt Is Handled by Flow 01",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare a Spanish Review Notice with Candidate Contact Details",
             "type": "main",
             "index": 0
           }

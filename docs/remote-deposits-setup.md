@@ -9,11 +9,17 @@ This replaces the extraction-only canonical draft, not the user's original
 `workflows/03 Remote Deposits.json`, which remains untouched and contains local
 credential/instance references and a personal sender. Do not commit that original
 as-is. Both original and tested local exports are ignored by Git. The canonical
-delivery is sanitized from `03-remote-deposits-tested.json`, preserving all 39
+delivery is sanitized from `03-remote-deposits-tested.json`, preserving all 39 originally
 tested node positions, IDs and connections. It is inactive, with all three effect
 gates false, without credentials, pinned data or local Error Workflow ID. Import into
 a new draft, or deliberately replace only your own assigned draft. Do not publish
 or leave two IMAP consumers listening at the same time.
+
+The export has 42 nodes: the 39 tested ones plus the three nodes of the home reservation
+hook (HU-13, `docs/README-changes.md` section 13), placed before `Keep Bank Notice
+Context for Reservation Identification`. Payments that are not about a pending request
+follow the old path unchanged. The hook's workflow ID is empty in the export: after
+importing, choose `11b Match Pending Request` in `Check Pending Home Request (flow 11b)`.
 
 The user explicitly deferred approval forms and automated mailbox-test tooling.
 The complete essential path is: IMAP → test-sender/subject filter → minimal Groq
