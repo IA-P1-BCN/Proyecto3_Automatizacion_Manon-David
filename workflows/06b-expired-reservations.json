@@ -283,7 +283,7 @@
       "id": "expired-reservations-15",
       "name": "Join",
       "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
+      "typeVersion": 2.1,
       "position": [
         2800,
         120
