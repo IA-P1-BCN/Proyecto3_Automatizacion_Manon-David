@@ -21,7 +21,7 @@
 
 - [x] 4.1 Export to `workflows/00-event-router.json` and verify the file contains no credentials.
 - [x] 4.2 Document in the README the webhook path, Test vs Production URL, "publish the router", and that events are lost if n8n is down; verify the steps work from a clean `docker compose up -d`.
-- [ ] 4.3 Open the PR and verify the other teammate reviewed it.
+- [x] 4.3 Open the PR and verify the other teammate reviewed it. Done: PR #33 merged by the other teammate.
 
 ## Workflow follow-up
 

@@ -39,7 +39,7 @@
 
 - [x] 5.1 Local tested export references the same Error Workflow used in the successful automatic test. Canonical sanitized export retains tested layout/code, no local credentials/addresses/pinned data, and documents per-instance Error Workflow reassociation.
 - [x] 5.2 Document IMAP, Groq, shop Header Auth, SMTP and local configuration field names in the README/setup; document subject/body-only external AI data and false-by-default write/notice gates.
-- [ ] 5.3 Log prompts, model comparison and agent errors in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
+- [x] 5.3 Log prompts, model comparison and agent errors in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it. Done: AI-016 to AI-019 logged, PR #49 merged by the other teammate.
 
 ## Workflow follow-up
 

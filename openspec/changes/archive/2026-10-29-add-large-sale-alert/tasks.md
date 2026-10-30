@@ -25,7 +25,7 @@
 
 - [x] 5.1 Export `workflows/04-large-sale-alert.json` and the updated router; verify neither contains credentials, `localhost` or real addresses.
 - [x] 5.2 Document the variable (name only), how to change it and why a restart is needed in `docs/README-changes.md`, and add the AI log entry; verify the README text matches the tested flow.
-- [ ] 5.3 Open the PR to `dev` with `Closes #9` and verify the other teammate reviewed it.
+- [x] 5.3 Open the PR to `dev` with `Closes #9` and verify the other teammate reviewed it. Done: PR #37 merged by the other teammate.
 
 ## Workflow follow-up
 

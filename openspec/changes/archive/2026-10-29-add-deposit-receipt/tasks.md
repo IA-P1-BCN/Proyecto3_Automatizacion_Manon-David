@@ -20,7 +20,7 @@
 
 - [x] 3.1 Export to `workflows/02-deposit-receipt.json` and verify no credentials or real addresses are in it.
 - [x] 3.2 Add the flow to the README credentials/variables list and save screenshots of the received messages in `docs/evidence/02-deposit-receipt/`.
-- [ ] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it.
+- [x] 3.3 Log prompts and agent corrections in `docs/ai-log.md`, open the PR and verify the other teammate reviewed it. Done: AI-009 logged, PR #34 merged by the other teammate.
 
 ## Workflow follow-up
 
