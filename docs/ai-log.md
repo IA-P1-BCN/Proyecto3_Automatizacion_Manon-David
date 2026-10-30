@@ -557,6 +557,7 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Delivery boundary:** The real lifecycle and recordings cover #21's stated creation/payments/settlement requirement; received-mailbox images and other peer-audit clips are supplemental gaps, not fabricated successes. PR should request closure through `Closes #21` only after human-reviewed integration. No claim that every audit item or all frames/audio were exhaustively checked. Publication and review request are pending final staged verification at this entry.
 
 - **Final local checks for AI-043:** `node --test workflows/code/*.test.js`: 411 passed, 0 failed. `git diff --check origin/dev` passed. Preservation assertions confirmed Manon's template and dev's detailed HU-03 verification remain together, with no conflict markers and all three media files below 100 MiB. No additional financial writes or notifications were performed.
+- **Final integration update:** Before publication, fetched the newer `dev` (`11b0754`, presentation preparation and OpenSpec archives); merged without conflicts after the shared-template/evidence integration commit. The portable readiness checker could not find its standard configuration on `main`; this repository instead has existing custom review/closure workflows, with recent successful closure runs observed. No automation installation/settings change was attempted; actual #21 closure and board status must still be verified after human merge.
 
 ## Entry template
 
