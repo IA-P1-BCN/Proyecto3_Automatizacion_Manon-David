@@ -20,6 +20,12 @@ Run `node workflows/code/build-05-daily-close.js` then `node --test workflows/co
 
 ## Real integration checklist (not implied by unit tests)
 
+- [x] Empty-day manual case, closing date 2026-10-29 (tested 2026-10-30): agent's read-only API queries returned zero sales and zero payments; David intentionally requested and received the Spanish no-movements summary with all totals zero, then confirmed `basedatos.csv` was saved correctly in kDrive. Email text supplied in conversation; CSV save user-reported, not independently downloaded by the agent. Details: `docs/evidence/05-daily-close/README.md`.
+
+The other checklist items below retain their existing status. This one manual
+case does not complete the three-date comparison, default-no-email check,
+same-ID/ETag tests or scheduled execution.
+
 - [ ] Import inactive workflow in local n8n, select local credentials and Error Workflow 08.
 - [ ] Confirm the Header Auth shop key works from the HTTP nodes.
 - [ ] Confirm drive-only token can list, download and upload in the test folder.

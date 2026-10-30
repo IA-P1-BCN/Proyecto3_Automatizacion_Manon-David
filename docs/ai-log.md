@@ -569,6 +569,17 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Final local checks for AI-043:** `node --test workflows/code/*.test.js`: 411 passed, 0 failed. `git diff --check origin/dev` passed. Preservation assertions confirmed Manon's template and dev's detailed HU-03 verification remain together, with no conflict markers and all three media files below 100 MiB. No additional financial writes or notifications were performed.
 - **Final integration update:** Before publication, fetched the newer `dev` (`11b0754`, presentation preparation and OpenSpec archives); merged without conflicts after the shared-template/evidence integration commit. The portable readiness checker could not find its standard configuration on `main`; this repository instead has existing custom review/closure workflows, with recent successful closure runs observed. No automation installation/settings change was attempted; actual #21 closure and board status must still be verified after human merge.
 
+### AI-045 — HU-04 empty-day demonstration evidence follow-up
+
+- **Date / issue / branch:** 2026-10-30; #4 — HU-04 · Cierre de caja automático; `docs/4-empty-day-close-evidence`, based on current dev. Issue #4 is already closed / Done; no issue or Project state change requested.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`, read-only shop REST requests through Python, Git/GitHub CLI and local Node.js tests.
+- **Request / authorization:** David asked how to demonstrate an empty closing, supplied the resulting email, confirmed correct history storage and explicitly requested documentation updates with commit and push. No PR opening, merge, workflow publication or additional financial/email/storage execution is authorized by this follow-up.
+- **Observed vs reported:** Agent queried sales and payments for 2026-10-29 on the intended local app (port 8001); both lists were empty. David executed the manual close, deliberately wanted the email, pasted the Spanish no-movements summary (all totals zero) and confirmed correct kDrive `basedatos.csv` storage after being asked to check that date. No independent CSV download, n8n execution inspection or screenshot source was supplied for these outputs.
+- **Accepted / deferred:** Record the empty-day case as demonstrated and replace the presentation's obsolete empty-day warning. Keep the three-date integration checklist and other unverified cases open; do not infer scheduled execution, same-file-ID behavior, ETag handling or row-order correction from one manual run. Preserve historical entries and distinguish the already-closed issue from remaining evidence gaps.
+- **Guidance correction:** The initial instruction used `send_email=false`; David clarified he intentionally wanted the email. Document the actual requested send, not a defect or a successful no-email-default test. No test was rerun merely to obtain evidence.
+- **Delivery scope:** Evidence index, presentation preparation, flow 05 test record and this log only; workflow JSON and runtime configuration unchanged. No secrets, mailbox addresses or invented screenshots added.
+- **Verification:** `node --test workflows/code/05-daily-close.test.js`: 17 passed, 0 failed; `git diff --check` passed. These repeatable local tests support the documentation change and do not replace David's reported manual integration results.
+
 ## Entry template
 
 Copy this template for the next meaningful unit of work. Replace all placeholders and omit empty optional fields. Use the next unused ID; do not renumber existing entries.
