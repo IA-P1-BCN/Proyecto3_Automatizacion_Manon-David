@@ -95,7 +95,7 @@ Prepare one real strength and one concrete production improvement from their che
 | Clear names, left-to-right | No generic names | Flow 03 names are long |
 | Keys in credentials, `.env` not on GitHub | Checked 2026-10-29 | none |
 | Error flow connected | 08 on every flow (live n8n) | repo JSON does not carry the setting |
-| Daily close with zero payments | `workflows/tests/05-daily-close.md` case "Empty": zero row + no-movements message | The live check against three dates incl. an empty day is still unticked in that file: run it before Friday |
+| Daily close with zero sales and payments | Closing date 2026-10-29: API lists empty; David confirmed the zero/no-movements email and correct kDrive history save on 2026-10-30. See `docs/evidence/05-daily-close/README.md` | Empty-day manual case demonstrated; no screenshot supplied. The broader three-date integration checklist remains open; no scheduled-run claim |
 | Doubtful emails handled safely | Flow 03: nothing registered, Marisa asked | none |
 | Optional webhook check | `TIENDA_WEBHOOK_TOKEN`, 401 without it | none |
 | AI only for extraction | Only flow 03, only subject and body | none |

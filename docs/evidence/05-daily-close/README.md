@@ -24,6 +24,30 @@ These values describe existing local demonstration data at the time of inspectio
 - The user repeated existing dates and confirmed that no extra rows were created; this specific no-duplicate test was accepted. A changed-amount update and preservation of the same cloud file ID were not independently verified.
 - These observations are reported through conversation/screenshots, not browser/API checks performed by the agent. No screenshot files have been fabricated or saved without an actual source file.
 
-## Pending real n8n checks
+## Empty-day manual integration (2026-10-30)
 
-Follow `workflows/tests/05-daily-close.md`. Empty-day integration, same-ID confirmation, ETag rejection, output-failure isolation, flow 08 notification from this flow and scheduled execution are **not yet verified**. The user reported forgetting to publish the workflow for the first night; no nightly execution is inferred. Local tests now total 29 (17 flow 05 + 12 flow 08). The requested append/insertion row order is still pending: this version sorts dates ascending. The review PR must not automatically close #4 until the remaining acceptance work is completed.
+Closing date: **2026-10-29**. This is a local demonstration, not a scheduled
+production run or a claim that every flow 05 integration case has passed.
+
+- **Agent-observed input:** read-only requests to the local shop API at
+  `http://localhost:8001` returned empty lists for both
+  `GET /api/ventas?desde=2026-10-29&hasta=2026-10-29` and
+  `GET /api/abonos?desde=2026-10-29&hasta=2026-10-29`: zero sales and zero payments.
+- **User-reported execution:** David ran flow 05 manually for that date and
+  intentionally requested the summary email. He supplied its text: title
+  "Cierre de caja del 29/10/2026", "No hubo movimientos.", and EUR 0.00 for
+  sales, payments and combined totals under efectivo, tarjeta, bizum and otros.
+  Overall direct sales, payments and collected totals are also EUR 0.00.
+- **User-reported persistence:** after being asked to check `basedatos.csv` in
+  kDrive for that date, David confirmed it was saved correctly. The agent did
+  not independently download the CSV or inspect the execution in n8n.
+- **Result:** the empty-day manual case is verified through API input checks
+  and user-confirmed email/history outputs. No screenshot or CSV attachment
+  was supplied; none is fabricated. The conversation is the output evidence.
+- **Boundary:** sending the email was intentional, not an error or a test of
+  the default `send_email=false`. This does not verify automatic scheduling,
+  same-file-ID replacement, ETag rejection, row order or failure isolation.
+
+## Other real n8n checks not established by the empty-day run
+
+Follow `workflows/tests/05-daily-close.md`. Same-ID confirmation, ETag rejection, output-failure isolation, flow 08 notification from this flow and scheduled execution are **not verified by the evidence recorded here**. The user previously reported forgetting to publish the workflow for the first night; no nightly execution is inferred. Local tests total 29 (17 flow 05 + 12 flow 08). The requested append/insertion row order is still pending in this version, which sorts dates ascending. Issue #4 was observed already closed / Done on 2026-10-30; this documentation follow-up does not reopen it or claim the remaining checks passed.
