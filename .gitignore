@@ -1,5 +1,6 @@
 .env
 .env.hu12-*
+.env.hu21-*
 __pycache__/
 *.db
 
