@@ -493,6 +493,16 @@ This is agent-assisted maintenance, not a background recorder. It operates while
 - **Verification and evidence:** `node --test workflows/code/*.test.js` passes (305 tests, 0 failures). In n8n: the request form with the user's own email, the nine notices through flow 03 with the hook (all behave as before), the preview with registration off, the creation with registration on (apartado 47 `activo`, row `confirmada`, one confirmation from flow 01) and the repeat, 3 € refusal and already-processing cases. Exports checked for credentials, `localhost`, addresses, IBANs and phone numbers. Details in `docs/evidence/11-home-reservations/README.md` and `workflows/tests/11-home-reservations.md`. Limits: the backend `pytest` has not been run for this entry; screenshots are pending.
 - **Remaining work at entry time:** screenshots of the form and both emails, the full test run with `pytest` (task 5.5), the issue sync and the PR to `dev` with `Closes #13` reviewed by David (task 5.6), and the note in the process map that HU-13 is covered by Option A (David's file; not edited by this branch).
 
+### AI-044 — PR #55 archived-task conflict resolution
+
+- **Date / issue / PR:** 2026-10-30; #13 — HU-13 · Entrada automática de datos; existing PR #55 by Manon, head `feat/13-home-reservations`. Entry number follows AI-043 delivered through #56.
+- **Tool and model:** OpenCode / `openai/gpt-6.1-sol`, Git/GitHub CLI, Python and Node.js local checks.
+- **Request and scope:** David requested resolving #55 as well. Inspected the exact PR diff, current issue and current dev. #13 is already closed / Done; retain `Refs #13`, do not reopen it or reimplement its workflows. No n8n or app actions, financial writes or emails.
+- **Resolution:** Isolated worktree based on Manon's existing commit `f3c6019`; merged current dev without rewriting history. The sole conflict was the tasks file moved into the OpenSpec archive by dev. Retained the archived path, Manon's process-map progress note, dev's later decision to drop screenshots with task 5.4 still open, and dev's completed task 5.6. No obsolete active change is recreated. The process-map note explains Option A without claiming the existing diagrams include the new flows.
+- **Verification:** `python3 scripts/verify-process-maps.py` passed both maps. Targeted unit tests for flows 11/11b: 31 passed, 0 failed. These are local structural/unit checks, not executed workflows or new screenshot evidence.
+- **Publication authorization:** David explicitly approved creating the commit, pushing the resolution to #55's existing branch and requesting Manon's review/merge. No autonomous PR merge or issue/Project mutation is authorized or performed.
+- **Latest base:** A final fetch found #56 already merged into dev (`c25c3ed`). Integrated it as well, retaining both #55's AI-044 and #56's AI-037–043 entries in the log; no evidence or teammate history discarded.
+
 ### AI-037 — Issue #21 evidence planning and inactive local integration preparation
 
 - **Date / issue / branch:** 2026-10-29; #21 — Prueba y evidencias de ejecución, assigned to both teammates; `docs/21-execution-evidence` from fetched `dev` (`460c7d8`). No publication permission carries over from HU-12.

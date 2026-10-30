@@ -71,6 +71,13 @@ the workflows locally. Telegram assistants (HU-11/12) and new input workflows
 only where they affect the ordinary layaway process; their separate maintenance
 workflows are not expanded here.
 
+HU-13 (#13) is covered by its first option only, home reservation requests
+(Option A). It is not drawn in the maps above: a customer asks through a form
+(flow 11), the request waits in a Data Table, and the apartado is created when the
+matching Bizum or transfer arrives (flows 11b and 03). See
+`docs/decisions-clarify.md` (section "Home reservations from the web") and
+`docs/README-changes.md` section 13.
+
 ## Acceptance and verification
 
 The issue has a short description rather than a detailed checklist. The
