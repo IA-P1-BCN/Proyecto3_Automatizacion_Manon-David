@@ -30,9 +30,18 @@ test('every AI node in the exported flows is named in the inventory', () => {
   assert.deepEqual(missing, []);
 });
 
-test('the inventory finds the Groq node of flow 03 (the scan sees what it should)', () => {
-  const found = exportedWorkflows().flatMap(({ file, workflow }) => (workflow.nodes || []).filter(isAiNode).map((node) => `${file}: ${node.name}`));
-  assert.deepEqual(found, ['03-remote-deposits.json: Extract Payer Amount and Concept from Bank Notice with Groq']);
+test('the inventory finds the exact known AI nodes of canonical flows 03 and 12', () => {
+  // Local ignored tested exports can coexist here; the preceding test still scans ALL
+  // exports for undocumented nodes. This assertion describes only the canonical pair.
+  const canonical = new Set(['03-remote-deposits.json', '12-shop-telegram-assistant.json']);
+  const found = exportedWorkflows().filter(({ file }) => canonical.has(file)).flatMap(({ file, workflow }) => (workflow.nodes || []).filter(isAiNode).map((node) => `${file}: ${node.name}`));
+  assert.deepEqual(found, [
+    '03-remote-deposits.json: Extract Payer Amount and Concept from Bank Notice with Groq',
+    '12-shop-telegram-assistant.json: Interpret Supported Shop Question',
+    '12-shop-telegram-assistant.json: Groq Shop Query Model',
+    '12-shop-telegram-assistant.json: Choose Weekly Collections Plan',
+    '12-shop-telegram-assistant.json: Choose Monthly Deadlines Plan',
+  ]);
 });
 
 test('an AI node that the inventory does not name is reported with its flow and name', () => {

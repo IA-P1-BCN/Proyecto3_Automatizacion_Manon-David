@@ -36,6 +36,18 @@ attributed. Optional local PDF conversion uses
 See [actual checks and limitations](workflows/tests/07-monthly-report.md).
 Importing/testing does not authorize publishing or scheduling unattended runs.
 
+## HU-12 implementation setup
+
+The new draft is `workflows/12-shop-telegram-assistant.json`. Follow the
+[owner-only Telegram setup](docs/shop-telegram-assistant-setup.md): only weekly
+collections and active reservations due this month are supported. The AI selects
+a closed plan; code authorizes, queries the API, verifies data and renders the
+Spanish reply. No financial writes or customer messages are available.
+
+The optional `docker-compose.shop-assistant.yml` bridge uses outbound polling,
+not a public n8n URL. All exports are inactive, credential-free and default to
+external effects off. See [actual checks and remaining live-test blockers](workflows/tests/12-shop-telegram-assistant.md).
+
 <img width="11520" height="3456" alt="n8n" src="https://github.com/user-attachments/assets/f8bdfbe6-0400-4f8e-a011-efb25c188db4" />
 
 ## 📋 Planteamiento
