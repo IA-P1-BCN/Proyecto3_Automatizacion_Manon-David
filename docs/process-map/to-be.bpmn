@@ -1,0 +1,1300 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<bpmn:definitions xmlns:bioc="http://bpmn.io/schema/bpmn/biocolor/1.0" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_tobe" targetNamespace="https://paso-firme.example/process-map" exporter="Paso Firme process map">
+  <bpmn:collaboration id="Collaboration_tobe">
+    <bpmn:participant id="Customer" name="Customer" processRef="Customer_process" />
+    <bpmn:participant id="Bank" name="Bank — sends Bizum / transfer notifications" />
+    <bpmn:participant id="Assistant" name="Shop assistant — physical shop operations" processRef="Assistant_process" />
+    <bpmn:participant id="App" name="Shop app — source of truth for payments, balances, states and vouchers" processRef="App_process" />
+    <bpmn:participant id="Automation" name="n8n — event routing, bank notices, schedules and failure alerts" processRef="Automation_process" />
+    <bpmn:participant id="Marisa" name="Marisa — review and business decisions" processRef="Marisa_process" />
+    <bpmn:messageFlow id="M1" sourceRef="cinitial" targetRef="as" name="Reservation / payment" />
+    <bpmn:messageFlow id="M2" sourceRef="a0" targetRef="ps" name="Create via app / API" />
+    <bpmn:messageFlow id="M3" sourceRef="p2" targetRef="rs" name="App webhook" />
+    <bpmn:messageFlow id="M4" sourceRef="q2" targetRef="rs" name="App webhook" />
+    <bpmn:messageFlow id="M5" sourceRef="Bank" targetRef="bs" name="Bank notice" />
+    <bpmn:messageFlow id="M6" sourceRef="b2" targetRef="qs" name="Payment API" />
+    <bpmn:messageFlow id="M7" sourceRef="x1" targetRef="vs" name="Expiry API" />
+    <bpmn:messageFlow id="M8" sourceRef="r2" targetRef="Customer" name="Customer email" />
+    <bpmn:messageFlow id="M9" sourceRef="x2" targetRef="hs" name="Shop summary" />
+    <bpmn:messageFlow id="M10" sourceRef="z1" targetRef="js" name="Sanitized failure alert" />
+    <bpmn:textAnnotation id="Overview">
+      <bpmn:text>TO-BE — Layaways with the shop app and n8n
+Target operating process, not evidence that local workflows are published. Blue: automation; orange: app; white: people. HU-08 and HU-14 are integrated in dev (checked 2026-10-28). Telegram assistants and new input flows are outside this map.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="CustomerNote">
+      <bpmn:text>Customer emails require consent: confirmation, payment receipt, collection notice, reminders and voucher. Missing email uses the shop follow-up path. The initial payment can settle the reservation immediately.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="EventNote">
+      <bpmn:text>HU-14: unauthorized requests are rejected; customer messages require consent via 09. Unreadable consent register blocks sends and raises an error. Flows 01/02 use app amounts. Flow 04 uses a configurable threshold. Router ignores apartado.vencido: 06b owns voucher notices. Unknown events are ignored.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="BankNote">
+      <bpmn:text>Not a payment: ignore. Invalid, ambiguous, unknown, overpaid or overdue: no registration; ask/notify Marisa. Uncertain POST result: stop and reconcile before retry. Confirmed payment =&gt; normal app event =&gt; receipt via 02, never a second bank-flow receipt.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="CloseNote">
+      <bpmn:text>One history row per date. Bizum totals include transfers. Manual reruns default to no email. Movements after 23:55 need recalculation of their original date; they do not automatically enter the next date's close.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="ExpiryNote">
+      <bpmn:text>No voucher receipt from the router. Once expired, the reservation is no longer selected. Failed customer email requires human follow-up; state change alone does not prove successful delivery. A manual app expiry does not trigger the 06b notice path.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="MonthlyNote">
+      <bpmn:text>HU-08 integrated in dev; publication is a separate authorization. Settlement month uses latest payment among currently settled reservations (no fecha_liquidacion). Expiry month uses voucher date. Debt is current, not historical month-end debt.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="ErrorNote">
+      <bpmn:text>Local Error Workflow association is required. Manual editor failures do not invoke it. If the alert email also fails, inspect n8n execution history; this map does not claim a second alert channel.</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:textAnnotation id="Limits">
+      <bpmn:text>Scope: operational layaway map and supporting summaries, not a node-by-node workflow export. No new financial records are created by reports. API business rejections are handled explicitly; unexpected failures go to configured Error Workflow 08. A webhook may be lost: app events are sent once without retries; schedules query the API independently.</bpmn:text>
+    </bpmn:textAnnotation>
+  </bpmn:collaboration>
+  <bpmn:process id="Customer_process" isExecutable="false">
+    <bpmn:startEvent id="cs" name="Wants to reserve shoes">
+      <bpmn:outgoing>F1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="cinitial" name="Choose shoes; pay initial deposit (EUR 5 minimum, up to full price)">
+      <bpmn:incoming>F1</bpmn:incoming>
+      <bpmn:outgoing>F2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="cwait" name="Wait; check payment confirmation and deadline">
+      <bpmn:incoming>F2</bpmn:incoming>
+      <bpmn:incoming>F7</bpmn:incoming>
+      <bpmn:outgoing>F3</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="cg" name="Reservation outcome?">
+      <bpmn:incoming>F3</bpmn:incoming>
+      <bpmn:outgoing>F4</bpmn:outgoing>
+      <bpmn:outgoing>F6</bpmn:outgoing>
+      <bpmn:outgoing>F8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="ccollect" name="Collect the shoes">
+      <bpmn:incoming>F4</bpmn:incoming>
+      <bpmn:outgoing>F5</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="ce" name="Shoes collected">
+      <bpmn:incoming>F5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="cpay" name="Make another payment within the deadline and remaining balance">
+      <bpmn:incoming>F6</bpmn:incoming>
+      <bpmn:outgoing>F7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="cvoucher" name="Receive store credit for the amount already paid (not cash)">
+      <bpmn:incoming>F8</bpmn:incoming>
+      <bpmn:outgoing>F9</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="cve" name="Reservation expired; voucher received">
+      <bpmn:incoming>F9</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="F1" sourceRef="cs" targetRef="cinitial" name="" />
+    <bpmn:sequenceFlow id="F2" sourceRef="cinitial" targetRef="cwait" name="" />
+    <bpmn:sequenceFlow id="F3" sourceRef="cwait" targetRef="cg" name="" />
+    <bpmn:sequenceFlow id="F4" sourceRef="cg" targetRef="ccollect" name="Paid in full" />
+    <bpmn:sequenceFlow id="F5" sourceRef="ccollect" targetRef="ce" name="" />
+    <bpmn:sequenceFlow id="F6" sourceRef="cg" targetRef="cpay" name="Balance; within deadline" />
+    <bpmn:sequenceFlow id="F7" sourceRef="cpay" targetRef="cwait" name="Payment confirmation" />
+    <bpmn:sequenceFlow id="F8" sourceRef="cg" targetRef="cvoucher" name="Expired by the shop" />
+    <bpmn:sequenceFlow id="F9" sourceRef="cvoucher" targetRef="cve" name="" />
+  </bpmn:process>
+  <bpmn:process id="Assistant_process" isExecutable="false">
+    <bpmn:startEvent id="as" name="Customer requests service">
+      <bpmn:outgoing>F10</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="as_message" />
+    </bpmn:startEvent>
+    <bpmn:userTask id="a0" name="Create reservation with initial payment, or register a later payment in the app">
+      <bpmn:incoming>F10</bpmn:incoming>
+      <bpmn:outgoing>F11</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="a1" name="Read app confirmation or business rejection; do not assume payment succeeded">
+      <bpmn:incoming>F11</bpmn:incoming>
+      <bpmn:outgoing>F12</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:manualTask id="a2" name="Put shoes aside; hand them over only after app confirms settlement">
+      <bpmn:incoming>F12</bpmn:incoming>
+      <bpmn:outgoing>F13</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:endEvent id="ae" name="Service completed">
+      <bpmn:incoming>F13</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="F10" sourceRef="as" targetRef="a0" name="" />
+    <bpmn:sequenceFlow id="F11" sourceRef="a0" targetRef="a1" name="" />
+    <bpmn:sequenceFlow id="F12" sourceRef="a1" targetRef="a2" name="" />
+    <bpmn:sequenceFlow id="F13" sourceRef="a2" targetRef="ae" name="" />
+  </bpmn:process>
+  <bpmn:process id="App_process" isExecutable="false">
+    <bpmn:startEvent id="ps" name="Reservation request">
+      <bpmn:outgoing>F14</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="ps_message" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="p0" name="Validate price and initial deposit; reject invalid requests">
+      <bpmn:incoming>F14</bpmn:incoming>
+      <bpmn:outgoing>F23</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="p1" name="Save reservation and initial payment; deadline = creation date + 90 days">
+      <bpmn:incoming>F24</bpmn:incoming>
+      <bpmn:outgoing>F15</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="p2" name="Return app result; announce apartado.creado after successful creation">
+      <bpmn:incoming>F15</bpmn:incoming>
+      <bpmn:outgoing>F16</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="pe" name="Saved; event announced">
+      <bpmn:incoming>F16</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="qs" name="Payment request">
+      <bpmn:outgoing>F17</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="qs_message" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="q0" name="Validate active state, deadline, positive amount and outstanding balance">
+      <bpmn:incoming>F17</bpmn:incoming>
+      <bpmn:outgoing>F26</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="q1" name="Save accepted payment once; update balance and settle at pending = 0">
+      <bpmn:incoming>F27</bpmn:incoming>
+      <bpmn:outgoing>F18</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="q2" name="Return result; announce abono.registrado only after accepted payment">
+      <bpmn:incoming>F18</bpmn:incoming>
+      <bpmn:outgoing>F19</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="qe" name="Saved; event announced">
+      <bpmn:incoming>F19</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="vs" name="Expiry API request">
+      <bpmn:outgoing>F20</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="vs_message" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="v0" name="Accept expiry only when active and deadline is strictly before today">
+      <bpmn:incoming>F20</bpmn:incoming>
+      <bpmn:outgoing>F29</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="v1" name="Set vencido and generate voucher for the amount already paid">
+      <bpmn:incoming>F30</bpmn:incoming>
+      <bpmn:outgoing>F21</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="v2" name="Return reservation and voucher; announce apartado.vencido">
+      <bpmn:incoming>F21</bpmn:incoming>
+      <bpmn:outgoing>F22</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="ve" name="Saved; event announced">
+      <bpmn:incoming>F22</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="pgate" name="Request valid?">
+      <bpmn:incoming>F23</bpmn:incoming>
+      <bpmn:outgoing>F24</bpmn:outgoing>
+      <bpmn:outgoing>F25</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="preject" name="Business rejection; no write">
+      <bpmn:incoming>F25</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="qgate" name="Request valid?">
+      <bpmn:incoming>F26</bpmn:incoming>
+      <bpmn:outgoing>F27</bpmn:outgoing>
+      <bpmn:outgoing>F28</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="qreject" name="Business rejection; no write">
+      <bpmn:incoming>F28</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="vgate" name="Request valid?">
+      <bpmn:incoming>F29</bpmn:incoming>
+      <bpmn:outgoing>F30</bpmn:outgoing>
+      <bpmn:outgoing>F31</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="vreject" name="Business rejection; no write">
+      <bpmn:incoming>F31</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="F14" sourceRef="ps" targetRef="p0" name="" />
+    <bpmn:sequenceFlow id="F15" sourceRef="p1" targetRef="p2" name="" />
+    <bpmn:sequenceFlow id="F16" sourceRef="p2" targetRef="pe" name="" />
+    <bpmn:sequenceFlow id="F17" sourceRef="qs" targetRef="q0" name="" />
+    <bpmn:sequenceFlow id="F18" sourceRef="q1" targetRef="q2" name="" />
+    <bpmn:sequenceFlow id="F19" sourceRef="q2" targetRef="qe" name="" />
+    <bpmn:sequenceFlow id="F20" sourceRef="vs" targetRef="v0" name="" />
+    <bpmn:sequenceFlow id="F21" sourceRef="v1" targetRef="v2" name="" />
+    <bpmn:sequenceFlow id="F22" sourceRef="v2" targetRef="ve" name="" />
+    <bpmn:sequenceFlow id="F23" sourceRef="p0" targetRef="pgate" name="" />
+    <bpmn:sequenceFlow id="F24" sourceRef="pgate" targetRef="p1" name="Yes" />
+    <bpmn:sequenceFlow id="F25" sourceRef="pgate" targetRef="preject" name="No: reject" />
+    <bpmn:sequenceFlow id="F26" sourceRef="q0" targetRef="qgate" name="" />
+    <bpmn:sequenceFlow id="F27" sourceRef="qgate" targetRef="q1" name="Yes" />
+    <bpmn:sequenceFlow id="F28" sourceRef="qgate" targetRef="qreject" name="No: reject" />
+    <bpmn:sequenceFlow id="F29" sourceRef="v0" targetRef="vgate" name="" />
+    <bpmn:sequenceFlow id="F30" sourceRef="vgate" targetRef="v1" name="Yes" />
+    <bpmn:sequenceFlow id="F31" sourceRef="vgate" targetRef="vreject" name="No: reject" />
+  </bpmn:process>
+  <bpmn:process id="Automation_process" isExecutable="false">
+    <bpmn:startEvent id="rs" name="App event received">
+      <bpmn:outgoing>F32</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="rs_message" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="r0" name="Authenticate app webhook; validate event; respect migration flag">
+      <bpmn:incoming>F32</bpmn:incoming>
+      <bpmn:outgoing>F33</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:businessRuleTask id="r1" name="Route creation / payment / sale to 01 / 02 / 04; check 09 consent for customer notices">
+      <bpmn:incoming>F33</bpmn:incoming>
+      <bpmn:outgoing>F34</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:sendTask id="r2" name="Send permitted customer notice or large-sale alert">
+      <bpmn:incoming>F34</bpmn:incoming>
+      <bpmn:outgoing>F35</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="re" name="Notice sent, held or shop informed">
+      <bpmn:incoming>F35</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="bs" name="Authorized bank email arrives">
+      <bpmn:outgoing>F36</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="bs_message" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="b0" name="Identify message and fingerprint content; Groq extracts payer, amount and reference only">
+      <bpmn:incoming>F36</bpmn:incoming>
+      <bpmn:outgoing>F37</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:businessRuleTask id="b1" name="Validate extraction; match deterministically; reread app balance, state and deadline">
+      <bpmn:incoming>F37</bpmn:incoming>
+      <bpmn:outgoing>F38</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:serviceTask id="b2" name="Register with API duplicate protection; reconcile uncertain results">
+      <bpmn:incoming>F39</bpmn:incoming>
+      <bpmn:outgoing>F41</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="be" name="Payment confirmed; receipt via 02">
+      <bpmn:incoming>F42</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:exclusiveGateway id="bankeligible" name="Clearly eligible?">
+      <bpmn:incoming>F38</bpmn:incoming>
+      <bpmn:outgoing>F39</bpmn:outgoing>
+      <bpmn:outgoing>F40</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:exclusiveGateway id="bankconfirmed" name="Payment confirmed?">
+      <bpmn:incoming>F41</bpmn:incoming>
+      <bpmn:outgoing>F42</bpmn:outgoing>
+      <bpmn:outgoing>F43</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="bankreview" name="No financial write / no blind replay. Ignore non-payments; send doubtful or uncertain cases for review.">
+      <bpmn:incoming>F40</bpmn:incoming>
+      <bpmn:incoming>F43</bpmn:incoming>
+      <bpmn:outgoing>F44</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="bankheld" name="Ignored or held for review">
+      <bpmn:incoming>F44</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="ds" name="Daily at 23:55 Madrid">
+      <bpmn:outgoing>F45</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="ds_timer" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="d0" name="05: query app direct sales and payments for the selected calendar day">
+      <bpmn:incoming>F45</bpmn:incoming>
+      <bpmn:outgoing>F46</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="d1" name="Sum integer cents by method; include initial payments once; empty day = zeros">
+      <bpmn:incoming>F46</bpmn:incoming>
+      <bpmn:outgoing>F47</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="d2" name="If requested, attempt email; then update kDrive basedatos.csv even if email failed">
+      <bpmn:incoming>F47</bpmn:incoming>
+      <bpmn:outgoing>F48</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="de" name="Close saved; failures reported">
+      <bpmn:incoming>F48</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="ns" name="Daily at 09:00 Madrid">
+      <bpmn:outgoing>F49</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="ns_timer" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="n0" name="06: query active reservations; select deadlines exactly 7 or 1 days away">
+      <bpmn:incoming>F49</bpmn:incoming>
+      <bpmn:outgoing>F50</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="n1" name="Check kDrive avisos.csv and 09 consent; send eligible reminder with app amounts">
+      <bpmn:incoming>F50</bpmn:incoming>
+      <bpmn:outgoing>F51</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="n2" name="Record sent notice or missing-email shop alert; report persistence failures">
+      <bpmn:incoming>F51</bpmn:incoming>
+      <bpmn:outgoing>F52</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="ne" name="Customer or shop informed">
+      <bpmn:incoming>F52</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="xs" name="Daily at 09:05 Madrid">
+      <bpmn:outgoing>F53</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="xs_timer" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="x0" name="06b: query active reservations whose deadline is strictly before today">
+      <bpmn:incoming>F53</bpmn:incoming>
+      <bpmn:outgoing>F54</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="x1" name="Call expiry API; read voucher; check 09 consent before customer notice">
+      <bpmn:incoming>F54</bpmn:incoming>
+      <bpmn:outgoing>F55</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="x2" name="Send Marisa one summary: shoes returned to sale and customers to contact">
+      <bpmn:incoming>F55</bpmn:incoming>
+      <bpmn:outgoing>F56</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="xe" name="Expired reservations handled">
+      <bpmn:incoming>F56</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="ms" name="Day 1 at 09:00 Madrid">
+      <bpmn:outgoing>F57</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="ms_timer" />
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="m0" name="07 / HU-08: query previous calendar month; separate direct sales and payments">
+      <bpmn:incoming>F57</bpmn:incoming>
+      <bpmn:outgoing>F58</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="m1" name="Report current active debt, new reservations and documented settlement/expiry proxies">
+      <bpmn:incoming>F58</bpmn:incoming>
+      <bpmn:outgoing>F59</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="m2" name="Email Spanish table; optional local PDF; conversion failure keeps table plus warning">
+      <bpmn:incoming>F59</bpmn:incoming>
+      <bpmn:outgoing>F60</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="me" name="Monthly report delivered">
+      <bpmn:incoming>F60</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="zs" name="Automatic execution fails">
+      <bpmn:outgoing>F61</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="z0" name="08: sanitize workflow, failing step and error; exclude secrets and unnecessary personal data">
+      <bpmn:incoming>F61</bpmn:incoming>
+      <bpmn:outgoing>F62</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sendTask id="z1" name="Notify Marisa; no automatic repair or blind replay">
+      <bpmn:incoming>F62</bpmn:incoming>
+      <bpmn:outgoing>F63</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="ze" name="Failure reported">
+      <bpmn:incoming>F63</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="F32" sourceRef="rs" targetRef="r0" name="" />
+    <bpmn:sequenceFlow id="F33" sourceRef="r0" targetRef="r1" name="" />
+    <bpmn:sequenceFlow id="F34" sourceRef="r1" targetRef="r2" name="" />
+    <bpmn:sequenceFlow id="F35" sourceRef="r2" targetRef="re" name="" />
+    <bpmn:sequenceFlow id="F36" sourceRef="bs" targetRef="b0" name="" />
+    <bpmn:sequenceFlow id="F37" sourceRef="b0" targetRef="b1" name="" />
+    <bpmn:sequenceFlow id="F38" sourceRef="b1" targetRef="bankeligible" name="" />
+    <bpmn:sequenceFlow id="F39" sourceRef="bankeligible" targetRef="b2" name="Yes" />
+    <bpmn:sequenceFlow id="F40" sourceRef="bankeligible" targetRef="bankreview" name="No" />
+    <bpmn:sequenceFlow id="F41" sourceRef="b2" targetRef="bankconfirmed" name="" />
+    <bpmn:sequenceFlow id="F42" sourceRef="bankconfirmed" targetRef="be" name="Yes" />
+    <bpmn:sequenceFlow id="F43" sourceRef="bankconfirmed" targetRef="bankreview" name="No / uncertain" />
+    <bpmn:sequenceFlow id="F44" sourceRef="bankreview" targetRef="bankheld" name="" />
+    <bpmn:sequenceFlow id="F45" sourceRef="ds" targetRef="d0" name="" />
+    <bpmn:sequenceFlow id="F46" sourceRef="d0" targetRef="d1" name="" />
+    <bpmn:sequenceFlow id="F47" sourceRef="d1" targetRef="d2" name="" />
+    <bpmn:sequenceFlow id="F48" sourceRef="d2" targetRef="de" name="" />
+    <bpmn:sequenceFlow id="F49" sourceRef="ns" targetRef="n0" name="" />
+    <bpmn:sequenceFlow id="F50" sourceRef="n0" targetRef="n1" name="" />
+    <bpmn:sequenceFlow id="F51" sourceRef="n1" targetRef="n2" name="" />
+    <bpmn:sequenceFlow id="F52" sourceRef="n2" targetRef="ne" name="" />
+    <bpmn:sequenceFlow id="F53" sourceRef="xs" targetRef="x0" name="" />
+    <bpmn:sequenceFlow id="F54" sourceRef="x0" targetRef="x1" name="" />
+    <bpmn:sequenceFlow id="F55" sourceRef="x1" targetRef="x2" name="" />
+    <bpmn:sequenceFlow id="F56" sourceRef="x2" targetRef="xe" name="" />
+    <bpmn:sequenceFlow id="F57" sourceRef="ms" targetRef="m0" name="" />
+    <bpmn:sequenceFlow id="F58" sourceRef="m0" targetRef="m1" name="" />
+    <bpmn:sequenceFlow id="F59" sourceRef="m1" targetRef="m2" name="" />
+    <bpmn:sequenceFlow id="F60" sourceRef="m2" targetRef="me" name="" />
+    <bpmn:sequenceFlow id="F61" sourceRef="zs" targetRef="z0" name="" />
+    <bpmn:sequenceFlow id="F62" sourceRef="z0" targetRef="z1" name="" />
+    <bpmn:sequenceFlow id="F63" sourceRef="z1" targetRef="ze" name="" />
+  </bpmn:process>
+  <bpmn:process id="Marisa_process" isExecutable="false">
+    <bpmn:startEvent id="hs" name="Review notice or summary">
+      <bpmn:outgoing>F64</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="hs_message" />
+    </bpmn:startEvent>
+    <bpmn:userTask id="h0" name="Review doubtful/rejected payments; contact customer if necessary">
+      <bpmn:incoming>F64</bpmn:incoming>
+      <bpmn:outgoing>F65</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="h1" name="Before any manual registration, verify whether the app already recorded the payment">
+      <bpmn:incoming>F65</bpmn:incoming>
+      <bpmn:outgoing>F66</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="h2" name="Read closing/report and act; arrange physical shoe return or customer contact">
+      <bpmn:incoming>F66</bpmn:incoming>
+      <bpmn:outgoing>F67</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="he" name="Business follow-up completed">
+      <bpmn:incoming>F67</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:startEvent id="js" name="Technical failure reported">
+      <bpmn:outgoing>F68</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="js_message" />
+    </bpmn:startEvent>
+    <bpmn:userTask id="j0" name="Contact the technical maintainer; preserve the execution reference">
+      <bpmn:incoming>F68</bpmn:incoming>
+      <bpmn:outgoing>F69</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="j1" name="Maintainer checks root cause and effects already completed">
+      <bpmn:incoming>F69</bpmn:incoming>
+      <bpmn:outgoing>F70</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="j2" name="Retry only after reconciliation and authorization where required">
+      <bpmn:incoming>F70</bpmn:incoming>
+      <bpmn:outgoing>F71</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="je" name="Safe recovery agreed">
+      <bpmn:incoming>F71</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="F64" sourceRef="hs" targetRef="h0" name="" />
+    <bpmn:sequenceFlow id="F65" sourceRef="h0" targetRef="h1" name="" />
+    <bpmn:sequenceFlow id="F66" sourceRef="h1" targetRef="h2" name="" />
+    <bpmn:sequenceFlow id="F67" sourceRef="h2" targetRef="he" name="" />
+    <bpmn:sequenceFlow id="F68" sourceRef="js" targetRef="j0" name="" />
+    <bpmn:sequenceFlow id="F69" sourceRef="j0" targetRef="j1" name="" />
+    <bpmn:sequenceFlow id="F70" sourceRef="j1" targetRef="j2" name="" />
+    <bpmn:sequenceFlow id="F71" sourceRef="j2" targetRef="je" name="" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_tobe">
+    <bpmndi:BPMNPlane id="Plane_tobe" bpmnElement="Collaboration_tobe">
+      <bpmndi:BPMNShape id="Customer_di" bpmnElement="Customer" isHorizontal="true">
+        <dc:Bounds x="40" y="140" width="2200" height="400" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Bank_di" bpmnElement="Bank" isHorizontal="true">
+        <dc:Bounds x="40" y="580" width="2200" height="70" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Assistant_di" bpmnElement="Assistant" isHorizontal="true">
+        <dc:Bounds x="40" y="700" width="2200" height="200" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="App_di" bpmnElement="App" isHorizontal="true">
+        <dc:Bounds x="40" y="940" width="2200" height="560" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Automation_di" bpmnElement="Automation" isHorizontal="true">
+        <dc:Bounds x="40" y="1540" width="2200" height="1420" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Marisa_di" bpmnElement="Marisa" isHorizontal="true">
+        <dc:Bounds x="40" y="3010" width="2200" height="400" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cs_di" bpmnElement="cs">
+        <dc:Bounds x="110" y="220" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="264" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cinitial_di" bpmnElement="cinitial">
+        <dc:Bounds x="240" y="200" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cwait_di" bpmnElement="cwait">
+        <dc:Bounds x="550" y="200" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cg_di" bpmnElement="cg" isMarkerVisible="true">
+        <dc:Bounds x="890" y="213" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="845.0" y="271" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ccollect_di" bpmnElement="ccollect">
+        <dc:Bounds x="1200" y="200" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ce_di" bpmnElement="ce">
+        <dc:Bounds x="1510" y="220" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1458.0" y="264" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cpay_di" bpmnElement="cpay">
+        <dc:Bounds x="550" y="360" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cvoucher_di" bpmnElement="cvoucher">
+        <dc:Bounds x="1200" y="360" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cve_di" bpmnElement="cve">
+        <dc:Bounds x="1510" y="380" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1458.0" y="424" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="as_di" bpmnElement="as">
+        <dc:Bounds x="110" y="780" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="824" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="a0_di" bpmnElement="a0">
+        <dc:Bounds x="240" y="760" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="a1_di" bpmnElement="a1">
+        <dc:Bounds x="550" y="760" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="a2_di" bpmnElement="a2">
+        <dc:Bounds x="860" y="760" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ae_di" bpmnElement="ae">
+        <dc:Bounds x="1200" y="780" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="824" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ps_di" bpmnElement="ps">
+        <dc:Bounds x="110" y="1030" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="1074" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="p0_di" bpmnElement="p0" bioc:fill="#fff3e0">
+        <dc:Bounds x="240" y="1010" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="p1_di" bpmnElement="p1" bioc:fill="#fff3e0">
+        <dc:Bounds x="650" y="1010" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="p2_di" bpmnElement="p2" bioc:fill="#fff3e0">
+        <dc:Bounds x="1040" y="1010" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="pe_di" bpmnElement="pe">
+        <dc:Bounds x="1450" y="1030" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1398.0" y="1074" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="qs_di" bpmnElement="qs">
+        <dc:Bounds x="110" y="1190" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="1234" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="q0_di" bpmnElement="q0" bioc:fill="#fff3e0">
+        <dc:Bounds x="240" y="1170" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="q1_di" bpmnElement="q1" bioc:fill="#fff3e0">
+        <dc:Bounds x="650" y="1170" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="q2_di" bpmnElement="q2" bioc:fill="#fff3e0">
+        <dc:Bounds x="1040" y="1170" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="qe_di" bpmnElement="qe">
+        <dc:Bounds x="1450" y="1190" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1398.0" y="1234" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="vs_di" bpmnElement="vs">
+        <dc:Bounds x="110" y="1350" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="1394" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="v0_di" bpmnElement="v0" bioc:fill="#fff3e0">
+        <dc:Bounds x="240" y="1330" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="v1_di" bpmnElement="v1" bioc:fill="#fff3e0">
+        <dc:Bounds x="650" y="1330" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="v2_di" bpmnElement="v2" bioc:fill="#fff3e0">
+        <dc:Bounds x="1040" y="1330" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ve_di" bpmnElement="ve">
+        <dc:Bounds x="1450" y="1350" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1398.0" y="1394" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="pgate_di" bpmnElement="pgate" isMarkerVisible="true">
+        <dc:Bounds x="530" y="1023" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="485.0" y="1081" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="preject_di" bpmnElement="preject">
+        <dc:Bounds x="1800" y="1030" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1748.0" y="1074" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="qgate_di" bpmnElement="qgate" isMarkerVisible="true">
+        <dc:Bounds x="530" y="1183" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="485.0" y="1241" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="qreject_di" bpmnElement="qreject">
+        <dc:Bounds x="1800" y="1190" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1748.0" y="1234" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="vgate_di" bpmnElement="vgate" isMarkerVisible="true">
+        <dc:Bounds x="530" y="1343" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="485.0" y="1401" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="vreject_di" bpmnElement="vreject">
+        <dc:Bounds x="1800" y="1350" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1748.0" y="1394" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="rs_di" bpmnElement="rs">
+        <dc:Bounds x="110" y="1630" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="1674" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="r0_di" bpmnElement="r0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="1610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="r1_di" bpmnElement="r1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="1610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="r2_di" bpmnElement="r2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="860" y="1610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="re_di" bpmnElement="re">
+        <dc:Bounds x="1200" y="1630" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="1674" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="bs_di" bpmnElement="bs">
+        <dc:Bounds x="110" y="1830" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="1874" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="b0_di" bpmnElement="b0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="1810" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="b1_di" bpmnElement="b1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="1810" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="b2_di" bpmnElement="b2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="940" y="1810" width="250" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="be_di" bpmnElement="be">
+        <dc:Bounds x="1430" y="1830" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1378.0" y="1874" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="bankeligible_di" bpmnElement="bankeligible" isMarkerVisible="true">
+        <dc:Bounds x="820" y="1823" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="775.0" y="1881" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="bankconfirmed_di" bpmnElement="bankconfirmed" isMarkerVisible="true">
+        <dc:Bounds x="1280" y="1823" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1235.0" y="1881" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="bankreview_di" bpmnElement="bankreview" bioc:fill="#e3f2fd">
+        <dc:Bounds x="940" y="1910" width="300" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="bankheld_di" bpmnElement="bankheld">
+        <dc:Bounds x="1430" y="1930" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1378.0" y="1974" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ds_di" bpmnElement="ds">
+        <dc:Bounds x="110" y="2040" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="2084" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="d0_di" bpmnElement="d0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="2020" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="d1_di" bpmnElement="d1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="2020" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="d2_di" bpmnElement="d2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="860" y="2020" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="de_di" bpmnElement="de">
+        <dc:Bounds x="1200" y="2040" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="2084" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ns_di" bpmnElement="ns">
+        <dc:Bounds x="110" y="2240" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="2284" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="n0_di" bpmnElement="n0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="2220" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="n1_di" bpmnElement="n1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="2220" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="n2_di" bpmnElement="n2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="860" y="2220" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ne_di" bpmnElement="ne">
+        <dc:Bounds x="1200" y="2240" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="2284" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="xs_di" bpmnElement="xs">
+        <dc:Bounds x="110" y="2430" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="2474" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="x0_di" bpmnElement="x0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="2410" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="x1_di" bpmnElement="x1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="2410" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="x2_di" bpmnElement="x2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="860" y="2410" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="xe_di" bpmnElement="xe">
+        <dc:Bounds x="1200" y="2430" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="2474" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ms_di" bpmnElement="ms">
+        <dc:Bounds x="110" y="2630" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="2674" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="m0_di" bpmnElement="m0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="2610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="m1_di" bpmnElement="m1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="2610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="m2_di" bpmnElement="m2" bioc:fill="#e3f2fd">
+        <dc:Bounds x="860" y="2610" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="me_di" bpmnElement="me">
+        <dc:Bounds x="1200" y="2630" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="2674" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="zs_di" bpmnElement="zs">
+        <dc:Bounds x="110" y="2830" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="2874" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="z0_di" bpmnElement="z0" bioc:fill="#e3f2fd">
+        <dc:Bounds x="240" y="2810" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="z1_di" bpmnElement="z1" bioc:fill="#e3f2fd">
+        <dc:Bounds x="550" y="2810" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ze_di" bpmnElement="ze">
+        <dc:Bounds x="890" y="2830" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="838.0" y="2874" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hs_di" bpmnElement="hs">
+        <dc:Bounds x="110" y="3100" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="3144" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="h0_di" bpmnElement="h0">
+        <dc:Bounds x="240" y="3080" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="h1_di" bpmnElement="h1">
+        <dc:Bounds x="550" y="3080" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="h2_di" bpmnElement="h2">
+        <dc:Bounds x="860" y="3080" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="he_di" bpmnElement="he">
+        <dc:Bounds x="1200" y="3100" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="3144" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="js_di" bpmnElement="js">
+        <dc:Bounds x="110" y="3290" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="58.0" y="3334" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="j0_di" bpmnElement="j0">
+        <dc:Bounds x="240" y="3270" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="j1_di" bpmnElement="j1">
+        <dc:Bounds x="550" y="3270" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="j2_di" bpmnElement="j2">
+        <dc:Bounds x="860" y="3270" width="220" height="76" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="je_di" bpmnElement="je">
+        <dc:Bounds x="1200" y="3290" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1148.0" y="3334" width="140" height="58" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Overview_di" bpmnElement="Overview">
+        <dc:Bounds x="40" y="15" width="2200" height="100" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CustomerNote_di" bpmnElement="CustomerNote">
+        <dc:Bounds x="1680" y="200" width="500" height="160" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EventNote_di" bpmnElement="EventNote">
+        <dc:Bounds x="1550" y="1600" width="620" height="150" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BankNote_di" bpmnElement="BankNote">
+        <dc:Bounds x="1550" y="1800" width="620" height="160" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CloseNote_di" bpmnElement="CloseNote">
+        <dc:Bounds x="1550" y="2010" width="620" height="145" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ExpiryNote_di" bpmnElement="ExpiryNote">
+        <dc:Bounds x="1550" y="2390" width="620" height="150" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="MonthlyNote_di" bpmnElement="MonthlyNote">
+        <dc:Bounds x="1550" y="2590" width="620" height="150" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ErrorNote_di" bpmnElement="ErrorNote">
+        <dc:Bounds x="1260" y="2800" width="910" height="130" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Limits_di" bpmnElement="Limits">
+        <dc:Bounds x="40" y="3450" width="2200" height="110" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="F1_di" bpmnElement="F1">
+        <di:waypoint x="146" y="238.0" />
+        <di:waypoint x="240" y="238.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F2_di" bpmnElement="F2">
+        <di:waypoint x="460" y="238.0" />
+        <di:waypoint x="550" y="238.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F3_di" bpmnElement="F3">
+        <di:waypoint x="770" y="238.0" />
+        <di:waypoint x="890" y="238.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F4_di" bpmnElement="F4">
+        <di:waypoint x="940" y="238.0" />
+        <di:waypoint x="1200" y="238.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="995.0" y="214.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F5_di" bpmnElement="F5">
+        <di:waypoint x="1420" y="238.0" />
+        <di:waypoint x="1510" y="238.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F6_di" bpmnElement="F6">
+        <di:waypoint x="915" y="263" />
+        <di:waypoint x="915" y="398" />
+        <di:waypoint x="770" y="398" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="767.5" y="374.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F7_di" bpmnElement="F7">
+        <di:waypoint x="660" y="360" />
+        <di:waypoint x="660" y="276" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="585.0" y="294.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F8_di" bpmnElement="F8">
+        <di:waypoint x="940" y="238" />
+        <di:waypoint x="1060" y="238" />
+        <di:waypoint x="1060" y="398" />
+        <di:waypoint x="1200" y="398" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1055.0" y="374.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F9_di" bpmnElement="F9">
+        <di:waypoint x="1420" y="398.0" />
+        <di:waypoint x="1510" y="398.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F10_di" bpmnElement="F10">
+        <di:waypoint x="146" y="798.0" />
+        <di:waypoint x="240" y="798.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F11_di" bpmnElement="F11">
+        <di:waypoint x="460" y="798.0" />
+        <di:waypoint x="550" y="798.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F12_di" bpmnElement="F12">
+        <di:waypoint x="770" y="798.0" />
+        <di:waypoint x="860" y="798.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F13_di" bpmnElement="F13">
+        <di:waypoint x="1080" y="798.0" />
+        <di:waypoint x="1200" y="798.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F14_di" bpmnElement="F14">
+        <di:waypoint x="146" y="1048.0" />
+        <di:waypoint x="240" y="1048.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F15_di" bpmnElement="F15">
+        <di:waypoint x="950" y="1048.0" />
+        <di:waypoint x="1040" y="1048.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F16_di" bpmnElement="F16">
+        <di:waypoint x="1340" y="1048.0" />
+        <di:waypoint x="1450" y="1048.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F17_di" bpmnElement="F17">
+        <di:waypoint x="146" y="1208.0" />
+        <di:waypoint x="240" y="1208.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F18_di" bpmnElement="F18">
+        <di:waypoint x="950" y="1208.0" />
+        <di:waypoint x="1040" y="1208.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F19_di" bpmnElement="F19">
+        <di:waypoint x="1340" y="1208.0" />
+        <di:waypoint x="1450" y="1208.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F20_di" bpmnElement="F20">
+        <di:waypoint x="146" y="1368.0" />
+        <di:waypoint x="240" y="1368.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F21_di" bpmnElement="F21">
+        <di:waypoint x="950" y="1368.0" />
+        <di:waypoint x="1040" y="1368.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F22_di" bpmnElement="F22">
+        <di:waypoint x="1340" y="1368.0" />
+        <di:waypoint x="1450" y="1368.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F23_di" bpmnElement="F23">
+        <di:waypoint x="460" y="1048.0" />
+        <di:waypoint x="530" y="1048.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F24_di" bpmnElement="F24">
+        <di:waypoint x="580" y="1048.0" />
+        <di:waypoint x="650" y="1048.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="540.0" y="1024.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F25_di" bpmnElement="F25">
+        <di:waypoint x="555" y="1023" />
+        <di:waypoint x="555" y="990" />
+        <di:waypoint x="1818" y="990" />
+        <di:waypoint x="1818" y="1030" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1111.5" y="966.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F26_di" bpmnElement="F26">
+        <di:waypoint x="460" y="1208.0" />
+        <di:waypoint x="530" y="1208.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F27_di" bpmnElement="F27">
+        <di:waypoint x="580" y="1208.0" />
+        <di:waypoint x="650" y="1208.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="540.0" y="1184.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F28_di" bpmnElement="F28">
+        <di:waypoint x="555" y="1183" />
+        <di:waypoint x="555" y="1150" />
+        <di:waypoint x="1818" y="1150" />
+        <di:waypoint x="1818" y="1190" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1111.5" y="1126.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F29_di" bpmnElement="F29">
+        <di:waypoint x="460" y="1368.0" />
+        <di:waypoint x="530" y="1368.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F30_di" bpmnElement="F30">
+        <di:waypoint x="580" y="1368.0" />
+        <di:waypoint x="650" y="1368.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="540.0" y="1344.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F31_di" bpmnElement="F31">
+        <di:waypoint x="555" y="1343" />
+        <di:waypoint x="555" y="1310" />
+        <di:waypoint x="1818" y="1310" />
+        <di:waypoint x="1818" y="1350" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1111.5" y="1286.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F32_di" bpmnElement="F32">
+        <di:waypoint x="146" y="1648.0" />
+        <di:waypoint x="240" y="1648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F33_di" bpmnElement="F33">
+        <di:waypoint x="460" y="1648.0" />
+        <di:waypoint x="550" y="1648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F34_di" bpmnElement="F34">
+        <di:waypoint x="770" y="1648.0" />
+        <di:waypoint x="860" y="1648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F35_di" bpmnElement="F35">
+        <di:waypoint x="1080" y="1648.0" />
+        <di:waypoint x="1200" y="1648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F36_di" bpmnElement="F36">
+        <di:waypoint x="146" y="1848.0" />
+        <di:waypoint x="240" y="1848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F37_di" bpmnElement="F37">
+        <di:waypoint x="460" y="1848.0" />
+        <di:waypoint x="550" y="1848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F38_di" bpmnElement="F38">
+        <di:waypoint x="770" y="1848.0" />
+        <di:waypoint x="820" y="1848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F39_di" bpmnElement="F39">
+        <di:waypoint x="870" y="1848.0" />
+        <di:waypoint x="940" y="1848.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="830.0" y="1824.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F40_di" bpmnElement="F40">
+        <di:waypoint x="845" y="1873" />
+        <di:waypoint x="845" y="1948" />
+        <di:waypoint x="940" y="1948" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="817.5" y="1924.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F41_di" bpmnElement="F41">
+        <di:waypoint x="1190" y="1848.0" />
+        <di:waypoint x="1280" y="1848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F42_di" bpmnElement="F42">
+        <di:waypoint x="1330" y="1848.0" />
+        <di:waypoint x="1430" y="1848.0" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1305.0" y="1824.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F43_di" bpmnElement="F43">
+        <di:waypoint x="1305" y="1873" />
+        <di:waypoint x="1305" y="1948" />
+        <di:waypoint x="1240" y="1948" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1197.5" y="1924.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F44_di" bpmnElement="F44">
+        <di:waypoint x="1240" y="1948.0" />
+        <di:waypoint x="1430" y="1948.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F45_di" bpmnElement="F45">
+        <di:waypoint x="146" y="2058.0" />
+        <di:waypoint x="240" y="2058.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F46_di" bpmnElement="F46">
+        <di:waypoint x="460" y="2058.0" />
+        <di:waypoint x="550" y="2058.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F47_di" bpmnElement="F47">
+        <di:waypoint x="770" y="2058.0" />
+        <di:waypoint x="860" y="2058.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F48_di" bpmnElement="F48">
+        <di:waypoint x="1080" y="2058.0" />
+        <di:waypoint x="1200" y="2058.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F49_di" bpmnElement="F49">
+        <di:waypoint x="146" y="2258.0" />
+        <di:waypoint x="240" y="2258.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F50_di" bpmnElement="F50">
+        <di:waypoint x="460" y="2258.0" />
+        <di:waypoint x="550" y="2258.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F51_di" bpmnElement="F51">
+        <di:waypoint x="770" y="2258.0" />
+        <di:waypoint x="860" y="2258.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F52_di" bpmnElement="F52">
+        <di:waypoint x="1080" y="2258.0" />
+        <di:waypoint x="1200" y="2258.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F53_di" bpmnElement="F53">
+        <di:waypoint x="146" y="2448.0" />
+        <di:waypoint x="240" y="2448.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F54_di" bpmnElement="F54">
+        <di:waypoint x="460" y="2448.0" />
+        <di:waypoint x="550" y="2448.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F55_di" bpmnElement="F55">
+        <di:waypoint x="770" y="2448.0" />
+        <di:waypoint x="860" y="2448.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F56_di" bpmnElement="F56">
+        <di:waypoint x="1080" y="2448.0" />
+        <di:waypoint x="1200" y="2448.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F57_di" bpmnElement="F57">
+        <di:waypoint x="146" y="2648.0" />
+        <di:waypoint x="240" y="2648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F58_di" bpmnElement="F58">
+        <di:waypoint x="460" y="2648.0" />
+        <di:waypoint x="550" y="2648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F59_di" bpmnElement="F59">
+        <di:waypoint x="770" y="2648.0" />
+        <di:waypoint x="860" y="2648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F60_di" bpmnElement="F60">
+        <di:waypoint x="1080" y="2648.0" />
+        <di:waypoint x="1200" y="2648.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F61_di" bpmnElement="F61">
+        <di:waypoint x="146" y="2848.0" />
+        <di:waypoint x="240" y="2848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F62_di" bpmnElement="F62">
+        <di:waypoint x="460" y="2848.0" />
+        <di:waypoint x="550" y="2848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F63_di" bpmnElement="F63">
+        <di:waypoint x="770" y="2848.0" />
+        <di:waypoint x="890" y="2848.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F64_di" bpmnElement="F64">
+        <di:waypoint x="146" y="3118.0" />
+        <di:waypoint x="240" y="3118.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F65_di" bpmnElement="F65">
+        <di:waypoint x="460" y="3118.0" />
+        <di:waypoint x="550" y="3118.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F66_di" bpmnElement="F66">
+        <di:waypoint x="770" y="3118.0" />
+        <di:waypoint x="860" y="3118.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F67_di" bpmnElement="F67">
+        <di:waypoint x="1080" y="3118.0" />
+        <di:waypoint x="1200" y="3118.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F68_di" bpmnElement="F68">
+        <di:waypoint x="146" y="3308.0" />
+        <di:waypoint x="240" y="3308.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F69_di" bpmnElement="F69">
+        <di:waypoint x="460" y="3308.0" />
+        <di:waypoint x="550" y="3308.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F70_di" bpmnElement="F70">
+        <di:waypoint x="770" y="3308.0" />
+        <di:waypoint x="860" y="3308.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="F71_di" bpmnElement="F71">
+        <di:waypoint x="1080" y="3308.0" />
+        <di:waypoint x="1200" y="3308.0" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M1_di" bpmnElement="M1">
+        <di:waypoint x="350" y="276" />
+        <di:waypoint x="350" y="555" />
+        <di:waypoint x="128" y="555" />
+        <di:waypoint x="128" y="780" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="164.0" y="531.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M2_di" bpmnElement="M2">
+        <di:waypoint x="350" y="836" />
+        <di:waypoint x="350" y="920" />
+        <di:waypoint x="128" y="920" />
+        <di:waypoint x="128" y="1030" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="164.0" y="896.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M3_di" bpmnElement="M3">
+        <di:waypoint x="1190" y="1086" />
+        <di:waypoint x="1190" y="1520" />
+        <di:waypoint x="128" y="1520" />
+        <di:waypoint x="128" y="1630" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="584.0" y="1496.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M4_di" bpmnElement="M4">
+        <di:waypoint x="1250" y="1246" />
+        <di:waypoint x="1250" y="1530" />
+        <di:waypoint x="150" y="1530" />
+        <di:waypoint x="150" y="1620" />
+        <di:waypoint x="146" y="1620" />
+        <di:waypoint x="146" y="1648" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="625.0" y="1506.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M5_di" bpmnElement="M5">
+        <di:waypoint x="2200" y="650" />
+        <di:waypoint x="2240" y="650" />
+        <di:waypoint x="2240" y="1780" />
+        <di:waypoint x="128" y="1780" />
+        <di:waypoint x="128" y="1830" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1109.0" y="1756.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M6_di" bpmnElement="M6">
+        <di:waypoint x="1065" y="1810" />
+        <di:waypoint x="2210" y="1810" />
+        <di:waypoint x="2210" y="1150" />
+        <di:waypoint x="128" y="1150" />
+        <di:waypoint x="128" y="1190" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1094.0" y="1126.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M7_di" bpmnElement="M7">
+        <di:waypoint x="660" y="2410" />
+        <di:waypoint x="2220" y="2410" />
+        <di:waypoint x="2220" y="1310" />
+        <di:waypoint x="128" y="1310" />
+        <di:waypoint x="128" y="1350" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1099.0" y="1286.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M8_di" bpmnElement="M8">
+        <di:waypoint x="970" y="1610" />
+        <di:waypoint x="970" y="1580" />
+        <di:waypoint x="2230" y="1580" />
+        <di:waypoint x="2230" y="520" />
+        <di:waypoint x="2220" y="520" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1525.0" y="1556.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M9_di" bpmnElement="M9">
+        <di:waypoint x="970" y="2486" />
+        <di:waypoint x="970" y="2980" />
+        <di:waypoint x="128" y="2980" />
+        <di:waypoint x="128" y="3100" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="474.0" y="2956.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M10_di" bpmnElement="M10">
+        <di:waypoint x="660" y="2886" />
+        <di:waypoint x="660" y="2995" />
+        <di:waypoint x="2190" y="2995" />
+        <di:waypoint x="2190" y="3240" />
+        <di:waypoint x="128" y="3240" />
+        <di:waypoint x="128" y="3290" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1084.0" y="3216.0" width="150" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

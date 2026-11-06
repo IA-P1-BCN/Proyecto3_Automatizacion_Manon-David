@@ -1,0 +1,47 @@
+{
+  "name": "00 Stub · Failing Handler (test only)",
+  "nodes": [
+    {
+      "id": "b1a1c1d1-0000-4000-8000-000000000050",
+      "name": "When Called By Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0000-4000-8000-000000000051",
+      "name": "Fail On Purpose",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "throw new Error('Fallo provocado en el manejador de prueba');"
+      }
+    }
+  ],
+  "connections": {
+    "When Called By Router": {
+      "main": [
+        [
+          {
+            "node": "Fail On Purpose",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

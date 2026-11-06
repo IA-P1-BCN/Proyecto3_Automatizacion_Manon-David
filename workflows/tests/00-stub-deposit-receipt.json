@@ -1,0 +1,45 @@
+{
+  "name": "00 Stub · Deposit Receipt (flow 02)",
+  "nodes": [
+    {
+      "id": "b1a1c1d1-0000-4000-8000-000000000030",
+      "name": "When Called By Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0000-4000-8000-000000000031",
+      "name": "Received Event",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "When Called By Router": {
+      "main": [
+        [
+          {
+            "node": "Received Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -7,3 +7,7 @@ class ReglaDeNegocio(ValueError):
 
 class NoEncontrado(LookupError):
     """No existe lo que se pide (HTTP 404)."""
+
+
+class IdempotencyConflict(ValueError):
+    """An existing payment key was reused with different request data (HTTP 409)."""

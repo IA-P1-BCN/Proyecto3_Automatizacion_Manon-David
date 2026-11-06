@@ -60,7 +60,7 @@ The system SHALL email the summary, in Spanish, to the shop's alert address, wit
 - **THEN** the shop address receives a Spanish email dated 22/10/2026 with per-method and overall totals
 
 ### Requirement: History with one row per date
-The system SHALL save each close in a spreadsheet history with one row per date, and rerunning a close for a date SHALL update that date's row instead of adding another.
+The system SHALL save each close in `basedatos.csv` in the configured kDrive folder, with one row per date. The file SHALL be created once and updated by its ID on later runs, without renaming or deleting it. CSV SHALL use UTF-8, semicolon columns and decimal commas. Rerunning a close SHALL update that date's row without changing other dates.
 
 #### Scenario: Rerun for the same date
 - **WHEN** the close for 2026-10-22 is run twice
@@ -69,17 +69,30 @@ The system SHALL save each close in a spreadsheet history with one row per date,
 ### Requirement: A close can be run for a chosen date
 The system SHALL allow a person to run the close by hand for a chosen past date, producing the same summary and history row for that date.
 
+Manual runs SHALL default to not sending email; an explicit boolean option SHALL enable resending. Future or invalid dates SHALL be rejected. Transactions added after the scheduled closing time SHALL be recoverable by recalculating their original date, not silently assigned to the next calendar day.
+
 #### Scenario: Recovering a missed night
 - **WHEN** a person runs the close by hand for 2026-10-20
 - **THEN** the summary and the history row are produced for 2026-10-20 and no other date's row changes
 
 ### Requirement: Failures are reported
-The system SHALL let any failure (app unreachable, spreadsheet unavailable, email failure) reach the error workflow, and a failure saving the history SHALL NOT prevent the summary email from being sent.
+The system SHALL let any failure (app unreachable, kDrive unavailable, email failure) reach the error workflow. Failure saving history SHALL NOT prevent an explicitly requested email attempt. Failure sending email SHALL NOT prevent a history attempt. An execution SHALL fail if either required output fails.
 
-#### Scenario: Spreadsheet unavailable
+#### Scenario: kDrive unavailable
 - **WHEN** saving to the history fails
 - **THEN** Marisa still receives the summary and the error workflow alerts the shop
 
 #### Scenario: App unreachable
 - **WHEN** the app cannot be reached at 23:55
 - **THEN** no summary is produced and the error workflow alerts the shop
+
+### Requirement: Safe history updates
+The system SHALL validate the existing CSV before replacement and use an ETag precondition on updates. A failed/incomplete listing or download SHALL NOT be treated as file absence. Concurrent changes, malformed history, duplicate dates, or a locked file SHALL fail without overwriting existing history. Existing files other than `basedatos.csv`, including `registro.txt`, SHALL remain untouched.
+
+#### Scenario: Manual rerun without email
+- **WHEN** a valid date is recalculated with send_email false
+- **THEN** only its history row changes and no summary email is sent
+
+#### Scenario: Concurrent history change
+- **WHEN** the file changes between discovery and upload
+- **THEN** the upload precondition fails and the execution reports an error without replacing the concurrent version

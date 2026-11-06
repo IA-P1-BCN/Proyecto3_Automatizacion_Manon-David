@@ -1,0 +1,219 @@
+{
+  "name": "02 Deposit Receipt",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "e02f6ff6-214b-40ee-b421-7f2ee3782689",
+      "name": "When Called By Router",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flow 02 · Deposit Receipt — \"Format Receipt\" Code node.\n// Pasted as-is into the Code node (mode: Run Once for All Items); also loaded by the tests.\n// Shows the app's figures exactly as the event carries them: nothing is recalculated (spec: figures come from the app).\n\nfunction formatEuros(amount) {\n  return `${amount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;\n}\n\n// \"2027-01-18\" -> \"18/01/2027\", without going through Date so no timezone can shift the day.\nfunction formatDate(isoDate) {\n  const [year, month, day] = String(isoDate).split('-');\n  return `${day}/${month}/${year}`;\n}\n\nfunction hasUsableEmail(email) {\n  return typeof email === 'string' && email.trim().includes('@');\n}\n\nfunction requireNumber(datos, field) {\n  if (typeof datos[field] !== 'number' || !Number.isFinite(datos[field])) {\n    throw new Error(`El aviso abono.registrado llegó sin «${field}» válido`);\n  }\n}\n\nfunction buildReceipt(datos) {\n  if (!datos || typeof datos !== 'object') throw new Error('El aviso abono.registrado llegó sin datos');\n  requireNumber(datos, 'importe');\n  requireNumber(datos, 'pendiente');\n  if (!datos.id) throw new Error('El aviso abono.registrado llegó sin número de apartado');\n\n  const paid = formatEuros(datos.importe);\n  // The app sends `talla: null` when the reservation has no size.\n  const size = String(datos.talla ?? '').trim();\n  const shoes = size ? `«${datos.producto}» (talla ${size})` : `«${datos.producto}»`;\n  const closing = 'Gracias por confiar en Zapatería Paso Firme.';\n\n  return {\n    emailValido: hasUsableEmail(datos.email),\n    liquidado: datos.estado === 'liquidado',\n    to: hasUsableEmail(datos.email) ? datos.email.trim() : '',\n    recibo: {\n      subject: `Recibo de tu abono · ${datos.producto}`,\n      body: [\n        `Hola ${datos.cliente},`,\n        '',\n        `Hemos registrado tu abono de ${paid} para tu apartado de ${shoes}.`,\n        '',\n        `Pendiente por pagar: ${formatEuros(datos.pendiente)}`,\n        `Fecha límite: ${formatDate(datos.fecha_limite)}`,\n        '',\n        closing,\n      ].join('\\n'),\n    },\n    recogida: {\n      subject: `Ya puedes recoger tus zapatos · ${datos.producto}`,\n      body: [\n        `Hola ${datos.cliente},`,\n        '',\n        `Hemos registrado tu último abono de ${paid}. Tu apartado de ${shoes} está totalmente pagado.`,\n        '',\n        'Ya puedes pasar por la tienda a recoger tus zapatos.',\n        '',\n        closing,\n      ].join('\\n'),\n    },\n    aviso: {\n      subject: `Abono sin recibo: el apartado nº ${datos.id} no tiene email válido`,\n      body: [\n        'Se registró un abono pero no se pudo enviar el recibo a la clienta.',\n        '',\n        `Apartado nº: ${datos.id}`,\n        `Cliente:     ${datos.cliente}`,\n        ...(datos.telefono ? [`Teléfono:    ${datos.telefono}`] : []),\n        `Abonado:     ${paid}`,\n        'Motivo:      el apartado no tiene email o el email no es válido.',\n      ].join('\\n'),\n    },\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { buildReceipt };\n// Inside n8n there is no `module`; `$input` exists only there.\nif (typeof $input !== 'undefined') return [{ json: buildReceipt($input.first().json.datos) }];\n"
+      },
+      "id": "ee14d5bc-8c87-4a70-9bcc-bb2183bbe629",
+      "name": "Format Receipt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "b1a1c1d1-0201-4000-8000-000000000021",
+              "leftValue": "={{ $json.emailValido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7c51f304-5465-4b07-a205-ee65d7417ee6",
+      "name": "Has Usable Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "b1a1c1d1-0201-4000-8000-000000000022",
+              "leftValue": "={{ $json.liquidado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3fc749d-07e0-49f1-8bea-f8927e5ea678",
+      "name": "Is Reservation Settled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        688,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.recogida.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.recogida.body }}",
+        "options": {}
+      },
+      "id": "c1c468f0-ff1f-4562-8433-754d0e181bfc",
+      "name": "Send Collect Your Shoes",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        944,
+        0
+      ],
+      "webhookId": "f92a8467-b697-48e8-bce7-f8ecd0af5a6c"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.recibo.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.recibo.body }}",
+        "options": {}
+      },
+      "id": "d1783a4b-7bf3-4ca9-a9ec-3712e57a4c98",
+      "name": "Send Partial Receipt",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        944,
+        160
+      ],
+      "webhookId": "48e98c35-00aa-47b0-8b2e-bf0b4c479d29"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.aviso.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.aviso.body }}",
+        "options": {}
+      },
+      "id": "9732b180-0b69-416a-b083-c0d1a6082628",
+      "name": "Send Shop Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        352
+      ],
+      "webhookId": "47134535-a171-404b-82d9-cc6d25871b7e"
+    }
+  ],
+  "connections": {
+    "When Called By Router": {
+      "main": [
+        [
+          {
+            "node": "Format Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Receipt": {
+      "main": [
+        [
+          {
+            "node": "Has Usable Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Usable Email?": {
+      "main": [
+        [
+          {
+            "node": "Is Reservation Settled?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Shop Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reservation Settled?": {
+      "main": [
+        [
+          {
+            "node": "Send Collect Your Shoes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Partial Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

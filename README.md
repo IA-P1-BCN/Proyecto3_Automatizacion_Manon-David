@@ -1,5 +1,53 @@
 # 👟 Proyecto: Automatizaciones con n8n · Zapatería Paso Firme
 
+## Layaway process map
+
+See the [manual and automated process maps](docs/process-map/README.md) for issue
+#19. SVG versions open in a web browser; the BPMN sources remain editable.
+
+## HU-03 implementation setup
+
+The essential workflow is `workflows/03-remote-deposits.json`. Import it as a draft
+and follow [the setup and minimal tests](docs/remote-deposits-setup.md). It requires
+local IMAP, Groq, shop Header Auth (`X-API-Key`) and SMTP credentials, plus local
+Error Workflow selection. The configuration node contains `authorized_test_sender`,
+`receiving_account_scope`, `shop_notice_to`, `shop_notice_from`, `allow_external_ai`,
+`allow_payment_registration` and `allow_shop_notices`; all effect gates default
+false. Only subject/body are sent to Groq, never the reservation list.
+
+The authorized backend retry-safety extension must be installed before financial
+writes; see [payment idempotency](docs/payment-idempotency.md). The approval form
+was explicitly deferred: Marisa resolves doubtful notices manually. Local/mocked
+checks are not proof of the final live integration; see [evidence](docs/evidence/03-remote-deposits/README.md).
+
+## HU-08 implementation setup
+
+Import `workflows/07-monthly-report.json` as an inactive draft and follow the
+[monthly report setup](docs/monthly-report-setup.md). It uses the existing shop
+Header Auth (`X-API-Key`), Infomaniak SMTP, `TIENDA_EMAIL_FROM`,
+`TIENDA_EMAIL_AVISOS` and local Error Workflow selection. Manual email/PDF
+options default off. A guard prevents the scheduled entry from sending during
+manual editor/CLI tests.
+
+The report covers the previous calendar month, distinguishes current active debt
+from historical month-end debt, and documents how settlement/expiry dates are
+attributed. Optional local PDF conversion uses
+`docker-compose.monthly-pdf.yml`; no AI provider or PDF SaaS is required.
+See [actual checks and limitations](workflows/tests/07-monthly-report.md).
+Importing/testing does not authorize publishing or scheduling unattended runs.
+
+## HU-12 implementation setup
+
+The new draft is `workflows/12-shop-telegram-assistant.json`. Follow the
+[owner-only Telegram setup](docs/shop-telegram-assistant-setup.md): only weekly
+collections and active reservations due this month are supported. The AI selects
+a closed plan; code authorizes, queries the API, verifies data and renders the
+Spanish reply. No financial writes or customer messages are available.
+
+The optional `docker-compose.shop-assistant.yml` bridge uses outbound polling,
+not a public n8n URL. All exports are inactive, credential-free and default to
+external effects off. See [actual checks and remaining live-test blockers](workflows/tests/12-shop-telegram-assistant.md).
+
 <img width="11520" height="3456" alt="n8n" src="https://github.com/user-attachments/assets/f8bdfbe6-0400-4f8e-a011-efb25c188db4" />
 
 ## 📋 Planteamiento

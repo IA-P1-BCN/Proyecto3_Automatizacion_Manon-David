@@ -4,9 +4,12 @@ Recibe los datos ya validados, llama a los modelos y devuelve el resultado.
 Qué URL llega a cada función se define en routes/apartados.py.
 """
 
-from fastapi import BackgroundTasks, Response
+from typing import Annotated
+
+from fastapi import BackgroundTasks, Header, Response
 
 from models import abono, apartado, vale
+from models.errores import ReglaDeNegocio
 from schemas.abono import AbonoIn
 from schemas.apartado import ApartadoIn
 from services import n8n
@@ -35,9 +38,24 @@ def crear(datos: ApartadoIn, tareas: BackgroundTasks):
     return nuevo
 
 
-def abonar(apartado_id: int, datos: AbonoIn, tareas: BackgroundTasks):
-    actualizado = abono.registrar(apartado_id, **datos.model_dump())
-    tareas.add_task(n8n.avisar, "abono.registrado", actualizado | {"importe": datos.importe})
+def abonar(apartado_id: int, datos: AbonoIn, tareas: BackgroundTasks,
+           idempotency_key: Annotated[str | None, Header(
+               alias="Idempotency-Key", min_length=1, max_length=128,
+               pattern=r"^[A-Za-z0-9._:-]+$",
+               description="Unique payment identifier. Reuse unchanged for retries; different data returns 409.",
+           )] = None,
+           notice_fingerprint: Annotated[str | None, Header(
+               alias="Payment-Notice-Fingerprint", min_length=64, max_length=64,
+               pattern=r"^[a-f0-9]{64}$",
+               description="Optional account-scoped SHA256 of notice content; duplicate content requires review.",
+           )] = None):
+    if notice_fingerprint and not idempotency_key:
+        raise ReglaDeNegocio("La huella del aviso requiere Idempotency-Key")
+    actualizado, replayed = abono.register_with_replay_result(
+        apartado_id, **datos.model_dump(), idempotency_key=idempotency_key,
+        notice_fingerprint=notice_fingerprint)
+    if not replayed:
+        tareas.add_task(n8n.avisar, "abono.registrado", actualizado | {"importe": datos.importe})
     return actualizado
 
 

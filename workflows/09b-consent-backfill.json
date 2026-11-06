@@ -1,0 +1,190 @@
+{
+  "id": "pasoFirmeConsentBackfill09b",
+  "name": "09b Consent Backfill",
+  "active": false,
+  "nodes": [
+    {
+      "id": "consent-backfill-1",
+      "name": "Manual Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "consent-backfill-2",
+      "name": "Fetch Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "consent-backfill-3",
+      "name": "Read Consent Register",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "consentimientos"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "consent-backfill-4",
+      "name": "Plan Missing Consents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 09 · consent decision: pure, shared by the generators and the tests.\n// The register (Data Table `consentimientos`) holds only email, estado, fecha and origen; no name, phone or balance.\n\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\n// Key of the register: trimmed and lowercase. Anything that is not an address gives null.\nfunction normaliseEmail(email) {\n  if (typeof email !== 'string') return null;\n  const clean = email.trim().toLowerCase();\n  return EMAIL_FORMAT.test(clean) ? clean : null;\n}\n\n// `rows` are the register's rows; an item with `error` stands for an unreadable table and blocks the send.\n// With `registrar` (a new reservation with an email) a missing row is created: giving an email in the shop is the consent.\n// A withdrawn row is never overwritten.\nfunction decideConsent(email, rows, { registrar = false, origen = 'tienda', hoy = '' } = {}) {\n  const key = normaliseEmail(email);\n  if (!key) {\n    const empty = typeof email !== 'string' || email.trim() === '';\n    return { permitido: false, razon: empty ? 'sin_email' : 'email_invalido', insertar: null };\n  }\n  if (!Array.isArray(rows) || rows.some((row) => row && row.error)) {\n    return { permitido: false, razon: 'registro_ilegible', insertar: null };\n  }\n  const row = rows.find((candidate) => normaliseEmail(candidate && candidate.email) === key);\n  if (row) {\n    return row.estado === 'activo'\n      ? { permitido: true, razon: 'activo', insertar: null }\n      : { permitido: false, razon: 'consentimiento_retirado', insertar: null };\n  }\n  if (registrar) {\n    return { permitido: true, razon: 'registrado', insertar: { email: key, estado: 'activo', fecha: hoy, origen } };\n  }\n  return { permitido: false, razon: 'sin_consentimiento', insertar: null };\n}\n\n// Backfill: the distinct valid emails of the app's reservations that the register does not hold yet.\nfunction missingConsents(reservations, rows, { hoy = '', origen = 'tienda (migración)' } = {}) {\n  const known = new Set((rows || []).map((row) => normaliseEmail(row && row.email)).filter(Boolean));\n  const result = [];\n  for (const reservation of reservations || []) {\n    const key = normaliseEmail(reservation && reservation.email);\n    if (!key || known.has(key)) continue;\n    known.add(key);\n    result.push({ email: key, estado: 'activo', fecha: hoy, origen });\n  }\n  return result;\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { normaliseEmail, decideConsent, missingConsents };\n}\n\nconst reservations = $('Fetch Reservations').all().map((item) => item.json);\nconst rows = $input.all().map((item) => item.json).filter((row) => row.email);\nconst hoy = $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd');\nreturn missingConsents(reservations, rows, { hoy }).map((row) => ({ json: row }));"
+      }
+    },
+    {
+      "id": "consent-backfill-5",
+      "name": "Record Consents",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "consentimientos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "estado": "={{ $json.estado }}",
+            "fecha": "={{ $json.fecha }}",
+            "origen": "={{ $json.origen }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "origen",
+              "displayName": "origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Manual Run": {
+      "main": [
+        [
+          {
+            "node": "Fetch Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Reservations": {
+      "main": [
+        [
+          {
+            "node": "Read Consent Register",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Consent Register": {
+      "main": [
+        [
+          {
+            "node": "Plan Missing Consents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Missing Consents": {
+      "main": [
+        [
+          {
+            "node": "Record Consents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

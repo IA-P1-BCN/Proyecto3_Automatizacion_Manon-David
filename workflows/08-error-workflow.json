@@ -1,0 +1,74 @@
+{
+  "name": "08 Error Workflow",
+  "nodes": [
+    {
+      "id": "b1a1c1d1-0801-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "b1a1c1d1-0801-4000-8000-000000000002",
+      "name": "Sanitise and Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Flow 08 · Error Workflow — \"Sanitise and format\" Code node.\n// Pasted as-is into the Code node (mode: Run Once for All Items); also loaded by the tests.\n// Reads only workflow name, execution id/url, last node and error message (spec: no customer data).\n\nconst HIDDEN = '[oculto]';\nconst MAX_MESSAGE_LENGTH = 500;\n\nconst AUTHORIZATION = /(authorization[\"']?\\s*[:=]\\s*[\"']?)(?:(?:bearer|basic)\\s+)?[^\\s\"',;}]+/gi;\nconst BEARER = /\\b(bearer\\s+)[^\\s\"',;}]+/gi;\nconst SECRET_PAIR = /([\"']?[\\w-]*(?:key|token|secret|pass)[\\w-]*[\"']?\\s*[:=]\\s*)(\"[^\"]*\"|'[^']*'|[^\\s\"',;}&]+)/gi;\n\nfunction maskSecrets(text) {\n  return text\n    .replace(AUTHORIZATION, `$1${HIDDEN}`)\n    .replace(BEARER, `$1${HIDDEN}`)\n    .replace(SECRET_PAIR, (_match, key, value) => {\n      const quote = /^[\"']/.test(value) ? value[0] : '';\n      return `${key}${quote}${HIDDEN}${quote}`;\n    });\n}\n\nfunction cutMessage(text) {\n  return text.length > MAX_MESSAGE_LENGTH ? `${text.slice(0, MAX_MESSAGE_LENGTH)}…` : text;\n}\n\nfunction formatMadridTime(date) {\n  return date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'medium' });\n}\n\nfunction buildAlert(errorEvent, now = new Date()) {\n  const workflowName = errorEvent?.workflow?.name || 'desconocido';\n  const step = errorEvent?.execution?.lastNodeExecuted || 'desconocido (falló el disparador)';\n  const rawMessage = errorEvent?.execution?.error?.message;\n  const message = rawMessage ? cutMessage(maskSecrets(String(rawMessage))) : 'error sin mensaje';\n  const link = errorEvent?.execution?.url || 'no disponible';\n\n  return {\n    subject: `⚠️ Falló la automatización «${workflowName}»`,\n    body: [\n      `Flujo:     ${workflowName}`,\n      `Paso:      ${step}`,\n      `Error:     ${message}`,\n      `Cuándo:    ${formatMadridTime(now)}`,\n      `Ejecución: ${link}`,\n    ].join('\\n'),\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { buildAlert, maskSecrets };\n// Inside n8n there is no `module`; `$input` exists only there.\nif (typeof $input !== 'undefined') return [{ json: buildAlert($input.first().json) }];\n"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0801-4000-8000-000000000003",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sanitise and Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitise and Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

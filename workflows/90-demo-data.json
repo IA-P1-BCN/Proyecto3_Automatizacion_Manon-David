@@ -1,0 +1,325 @@
+{
+  "name": "90 Demo Data",
+  "nodes": [
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000001",
+      "name": "Run Demo Data",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000002",
+      "name": "Build Demo Scenarios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 90 · Demo Data — logic of the Code nodes.\n// Pasted ahead of each Code node's own lines by build-90-demo-data.js; also loaded by the tests.\n// Only prices, deposits and the original date are sent: the app calculates abonado, pendiente, fecha_limite and estado.\n\nconst OVERDUE_DAYS = 100;\n\n// \"2026-10-25\" minus 100 days, computed in UTC so no timezone can shift the day.\nfunction subtractDays(isoDate, days) {\n  const date = new Date(`${isoDate}T00:00:00Z`);\n  if (Number.isNaN(date.getTime())) throw new Error(`Fecha de hoy no válida: «${isoDate}»`);\n  date.setUTCDate(date.getUTCDate() - days);\n  return date.toISOString().slice(0, 10);\n}\n\nfunction buildScenarios(email, today) {\n  if (typeof email !== 'string' || !email.includes('@')) {\n    throw new Error('Configura TIENDA_EMAIL_AVISOS: los clientes de demostración usan esa dirección.');\n  }\n  return [\n    {\n      reserva: {\n        cliente: 'Lucía Prado (demo)', telefono: '612 000 101', email, producto: 'Bota de piel negra', talla: '38',\n        precio: 89.9, abono_inicial: 10, forma_pago: 'bizum',\n      },\n      abonos: [{ importe: 20, forma_pago: 'efectivo' }],\n    },\n    {\n      reserva: {\n        cliente: 'Marcos Vidal (demo)', telefono: '612 000 102', email, producto: 'Zapatilla blanca urbana',\n        precio: 45, abono_inicial: 10, forma_pago: 'efectivo',\n      },\n      abonos: [{ importe: 35, forma_pago: 'tarjeta' }],\n    },\n    {\n      reserva: {\n        cliente: 'Elena Soto (demo)', telefono: '612 000 103', email, producto: 'Sandalia de cuña', talla: '37',\n        precio: 59.9, abono_inicial: 59.9, forma_pago: 'tarjeta',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Pablo Ríos (demo)', telefono: '612 000 104', producto: 'Mocasín marrón', talla: '43',\n        precio: 74.5, abono_inicial: 15, forma_pago: 'efectivo',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Irene Mora (demo)', telefono: '612 000 105', email, producto: 'Zapato de tacón', talla: '39',\n        precio: 64.5, abono_inicial: 10, forma_pago: 'efectivo', fecha: subtractDays(today, OVERDUE_DAYS),\n      },\n      abonos: [],\n    },\n  ];\n}\n\n// Keeps the scenarios whose customer is not in the app yet. `existing` is the app's reservation list.\nfunction dropExisting(scenarios, existing) {\n  const taken = new Set(existing.filter((apartado) => apartado && apartado.cliente).map((apartado) => apartado.cliente));\n  return scenarios.filter((scenario) => !taken.has(scenario.reserva.cliente));\n}\n\n// `created` are the app's answers, in the order the reservations were sent.\nfunction planDeposits(scenarios, created) {\n  if (created.length !== scenarios.length) {\n    throw new Error(`Se crearon ${created.length} apartados y se esperaban ${scenarios.length}.`);\n  }\n  return created.flatMap((apartado, index) => {\n    const { reserva, abonos } = scenarios[index];\n    if (apartado.cliente !== reserva.cliente || !apartado.id) {\n      throw new Error(`La app devolvió un apartado inesperado para «${reserva.cliente}».`);\n    }\n    return abonos.map((abono) => ({ apartado_id: apartado.id, cliente: reserva.cliente, ...abono }));\n  });\n}\n\nfunction summarize(total, created, deposits) {\n  const ids = created.map((apartado) => apartado.id);\n  const skipped = total - created.length;\n  return {\n    creados: created.length,\n    omitidos: skipped,\n    abonos_registrados: deposits.length,\n    ids,\n    resultado: created.length === 0\n      ? 'Los datos de demostración ya existen: no se ha creado nada.'\n      : `Datos de demostración cargados: ${created.length} apartados nuevos, ${skipped} ya existían.`,\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { subtractDays, buildScenarios, dropExisting, planDeposits, summarize };\n\nreturn buildScenarios($env.TIENDA_EMAIL_AVISOS, $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd')).map((scenario) => ({ json: scenario }));"
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000003",
+      "name": "List Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000004",
+      "name": "Drop Existing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 90 · Demo Data — logic of the Code nodes.\n// Pasted ahead of each Code node's own lines by build-90-demo-data.js; also loaded by the tests.\n// Only prices, deposits and the original date are sent: the app calculates abonado, pendiente, fecha_limite and estado.\n\nconst OVERDUE_DAYS = 100;\n\n// \"2026-10-25\" minus 100 days, computed in UTC so no timezone can shift the day.\nfunction subtractDays(isoDate, days) {\n  const date = new Date(`${isoDate}T00:00:00Z`);\n  if (Number.isNaN(date.getTime())) throw new Error(`Fecha de hoy no válida: «${isoDate}»`);\n  date.setUTCDate(date.getUTCDate() - days);\n  return date.toISOString().slice(0, 10);\n}\n\nfunction buildScenarios(email, today) {\n  if (typeof email !== 'string' || !email.includes('@')) {\n    throw new Error('Configura TIENDA_EMAIL_AVISOS: los clientes de demostración usan esa dirección.');\n  }\n  return [\n    {\n      reserva: {\n        cliente: 'Lucía Prado (demo)', telefono: '612 000 101', email, producto: 'Bota de piel negra', talla: '38',\n        precio: 89.9, abono_inicial: 10, forma_pago: 'bizum',\n      },\n      abonos: [{ importe: 20, forma_pago: 'efectivo' }],\n    },\n    {\n      reserva: {\n        cliente: 'Marcos Vidal (demo)', telefono: '612 000 102', email, producto: 'Zapatilla blanca urbana',\n        precio: 45, abono_inicial: 10, forma_pago: 'efectivo',\n      },\n      abonos: [{ importe: 35, forma_pago: 'tarjeta' }],\n    },\n    {\n      reserva: {\n        cliente: 'Elena Soto (demo)', telefono: '612 000 103', email, producto: 'Sandalia de cuña', talla: '37',\n        precio: 59.9, abono_inicial: 59.9, forma_pago: 'tarjeta',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Pablo Ríos (demo)', telefono: '612 000 104', producto: 'Mocasín marrón', talla: '43',\n        precio: 74.5, abono_inicial: 15, forma_pago: 'efectivo',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Irene Mora (demo)', telefono: '612 000 105', email, producto: 'Zapato de tacón', talla: '39',\n        precio: 64.5, abono_inicial: 10, forma_pago: 'efectivo', fecha: subtractDays(today, OVERDUE_DAYS),\n      },\n      abonos: [],\n    },\n  ];\n}\n\n// Keeps the scenarios whose customer is not in the app yet. `existing` is the app's reservation list.\nfunction dropExisting(scenarios, existing) {\n  const taken = new Set(existing.filter((apartado) => apartado && apartado.cliente).map((apartado) => apartado.cliente));\n  return scenarios.filter((scenario) => !taken.has(scenario.reserva.cliente));\n}\n\n// `created` are the app's answers, in the order the reservations were sent.\nfunction planDeposits(scenarios, created) {\n  if (created.length !== scenarios.length) {\n    throw new Error(`Se crearon ${created.length} apartados y se esperaban ${scenarios.length}.`);\n  }\n  return created.flatMap((apartado, index) => {\n    const { reserva, abonos } = scenarios[index];\n    if (apartado.cliente !== reserva.cliente || !apartado.id) {\n      throw new Error(`La app devolvió un apartado inesperado para «${reserva.cliente}».`);\n    }\n    return abonos.map((abono) => ({ apartado_id: apartado.id, cliente: reserva.cliente, ...abono }));\n  });\n}\n\nfunction summarize(total, created, deposits) {\n  const ids = created.map((apartado) => apartado.id);\n  const skipped = total - created.length;\n  return {\n    creados: created.length,\n    omitidos: skipped,\n    abonos_registrados: deposits.length,\n    ids,\n    resultado: created.length === 0\n      ? 'Los datos de demostración ya existen: no se ha creado nada.'\n      : `Datos de demostración cargados: ${created.length} apartados nuevos, ${skipped} ya existían.`,\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { subtractDays, buildScenarios, dropExisting, planDeposits, summarize };\n\nconst scenarios = $('Build Demo Scenarios').all().map((item) => item.json);\nconst pending = dropExisting(scenarios, $input.all().map((item) => item.json));\nreturn pending.length ? pending.map((scenario) => ({ json: scenario })) : [{ json: { nada: true } }];"
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000005",
+      "name": "Anything To Create?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d90a1c1d-0090-4000-8000-000000000044",
+              "leftValue": "={{ $json.reserva !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000006",
+      "name": "Create Reservation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.reserva) }}"
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000007",
+      "name": "Plan Deposits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 90 · Demo Data — logic of the Code nodes.\n// Pasted ahead of each Code node's own lines by build-90-demo-data.js; also loaded by the tests.\n// Only prices, deposits and the original date are sent: the app calculates abonado, pendiente, fecha_limite and estado.\n\nconst OVERDUE_DAYS = 100;\n\n// \"2026-10-25\" minus 100 days, computed in UTC so no timezone can shift the day.\nfunction subtractDays(isoDate, days) {\n  const date = new Date(`${isoDate}T00:00:00Z`);\n  if (Number.isNaN(date.getTime())) throw new Error(`Fecha de hoy no válida: «${isoDate}»`);\n  date.setUTCDate(date.getUTCDate() - days);\n  return date.toISOString().slice(0, 10);\n}\n\nfunction buildScenarios(email, today) {\n  if (typeof email !== 'string' || !email.includes('@')) {\n    throw new Error('Configura TIENDA_EMAIL_AVISOS: los clientes de demostración usan esa dirección.');\n  }\n  return [\n    {\n      reserva: {\n        cliente: 'Lucía Prado (demo)', telefono: '612 000 101', email, producto: 'Bota de piel negra', talla: '38',\n        precio: 89.9, abono_inicial: 10, forma_pago: 'bizum',\n      },\n      abonos: [{ importe: 20, forma_pago: 'efectivo' }],\n    },\n    {\n      reserva: {\n        cliente: 'Marcos Vidal (demo)', telefono: '612 000 102', email, producto: 'Zapatilla blanca urbana',\n        precio: 45, abono_inicial: 10, forma_pago: 'efectivo',\n      },\n      abonos: [{ importe: 35, forma_pago: 'tarjeta' }],\n    },\n    {\n      reserva: {\n        cliente: 'Elena Soto (demo)', telefono: '612 000 103', email, producto: 'Sandalia de cuña', talla: '37',\n        precio: 59.9, abono_inicial: 59.9, forma_pago: 'tarjeta',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Pablo Ríos (demo)', telefono: '612 000 104', producto: 'Mocasín marrón', talla: '43',\n        precio: 74.5, abono_inicial: 15, forma_pago: 'efectivo',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Irene Mora (demo)', telefono: '612 000 105', email, producto: 'Zapato de tacón', talla: '39',\n        precio: 64.5, abono_inicial: 10, forma_pago: 'efectivo', fecha: subtractDays(today, OVERDUE_DAYS),\n      },\n      abonos: [],\n    },\n  ];\n}\n\n// Keeps the scenarios whose customer is not in the app yet. `existing` is the app's reservation list.\nfunction dropExisting(scenarios, existing) {\n  const taken = new Set(existing.filter((apartado) => apartado && apartado.cliente).map((apartado) => apartado.cliente));\n  return scenarios.filter((scenario) => !taken.has(scenario.reserva.cliente));\n}\n\n// `created` are the app's answers, in the order the reservations were sent.\nfunction planDeposits(scenarios, created) {\n  if (created.length !== scenarios.length) {\n    throw new Error(`Se crearon ${created.length} apartados y se esperaban ${scenarios.length}.`);\n  }\n  return created.flatMap((apartado, index) => {\n    const { reserva, abonos } = scenarios[index];\n    if (apartado.cliente !== reserva.cliente || !apartado.id) {\n      throw new Error(`La app devolvió un apartado inesperado para «${reserva.cliente}».`);\n    }\n    return abonos.map((abono) => ({ apartado_id: apartado.id, cliente: reserva.cliente, ...abono }));\n  });\n}\n\nfunction summarize(total, created, deposits) {\n  const ids = created.map((apartado) => apartado.id);\n  const skipped = total - created.length;\n  return {\n    creados: created.length,\n    omitidos: skipped,\n    abonos_registrados: deposits.length,\n    ids,\n    resultado: created.length === 0\n      ? 'Los datos de demostración ya existen: no se ha creado nada.'\n      : `Datos de demostración cargados: ${created.length} apartados nuevos, ${skipped} ya existían.`,\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { subtractDays, buildScenarios, dropExisting, planDeposits, summarize };\n\nconst scenarios = $('Drop Existing').all().map((item) => item.json);\nconst deposits = planDeposits(scenarios, $input.all().map((item) => item.json));\nreturn deposits.length ? deposits.map((deposit) => ({ json: deposit })) : [{ json: { sinAbonos: true } }];"
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000008",
+      "name": "Any Deposits?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d90a1c1d-0090-4000-8000-000000000047",
+              "leftValue": "={{ $json.importe !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000009",
+      "name": "Register Deposit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://tienda:8000/api/apartados/{{ $json.apartado_id }}/abonos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ importe: $json.importe, forma_pago: $json.forma_pago }) }}"
+      }
+    },
+    {
+      "id": "d90a1c1d-0090-4000-8000-000000000010",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 90 · Demo Data — logic of the Code nodes.\n// Pasted ahead of each Code node's own lines by build-90-demo-data.js; also loaded by the tests.\n// Only prices, deposits and the original date are sent: the app calculates abonado, pendiente, fecha_limite and estado.\n\nconst OVERDUE_DAYS = 100;\n\n// \"2026-10-25\" minus 100 days, computed in UTC so no timezone can shift the day.\nfunction subtractDays(isoDate, days) {\n  const date = new Date(`${isoDate}T00:00:00Z`);\n  if (Number.isNaN(date.getTime())) throw new Error(`Fecha de hoy no válida: «${isoDate}»`);\n  date.setUTCDate(date.getUTCDate() - days);\n  return date.toISOString().slice(0, 10);\n}\n\nfunction buildScenarios(email, today) {\n  if (typeof email !== 'string' || !email.includes('@')) {\n    throw new Error('Configura TIENDA_EMAIL_AVISOS: los clientes de demostración usan esa dirección.');\n  }\n  return [\n    {\n      reserva: {\n        cliente: 'Lucía Prado (demo)', telefono: '612 000 101', email, producto: 'Bota de piel negra', talla: '38',\n        precio: 89.9, abono_inicial: 10, forma_pago: 'bizum',\n      },\n      abonos: [{ importe: 20, forma_pago: 'efectivo' }],\n    },\n    {\n      reserva: {\n        cliente: 'Marcos Vidal (demo)', telefono: '612 000 102', email, producto: 'Zapatilla blanca urbana',\n        precio: 45, abono_inicial: 10, forma_pago: 'efectivo',\n      },\n      abonos: [{ importe: 35, forma_pago: 'tarjeta' }],\n    },\n    {\n      reserva: {\n        cliente: 'Elena Soto (demo)', telefono: '612 000 103', email, producto: 'Sandalia de cuña', talla: '37',\n        precio: 59.9, abono_inicial: 59.9, forma_pago: 'tarjeta',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Pablo Ríos (demo)', telefono: '612 000 104', producto: 'Mocasín marrón', talla: '43',\n        precio: 74.5, abono_inicial: 15, forma_pago: 'efectivo',\n      },\n      abonos: [],\n    },\n    {\n      reserva: {\n        cliente: 'Irene Mora (demo)', telefono: '612 000 105', email, producto: 'Zapato de tacón', talla: '39',\n        precio: 64.5, abono_inicial: 10, forma_pago: 'efectivo', fecha: subtractDays(today, OVERDUE_DAYS),\n      },\n      abonos: [],\n    },\n  ];\n}\n\n// Keeps the scenarios whose customer is not in the app yet. `existing` is the app's reservation list.\nfunction dropExisting(scenarios, existing) {\n  const taken = new Set(existing.filter((apartado) => apartado && apartado.cliente).map((apartado) => apartado.cliente));\n  return scenarios.filter((scenario) => !taken.has(scenario.reserva.cliente));\n}\n\n// `created` are the app's answers, in the order the reservations were sent.\nfunction planDeposits(scenarios, created) {\n  if (created.length !== scenarios.length) {\n    throw new Error(`Se crearon ${created.length} apartados y se esperaban ${scenarios.length}.`);\n  }\n  return created.flatMap((apartado, index) => {\n    const { reserva, abonos } = scenarios[index];\n    if (apartado.cliente !== reserva.cliente || !apartado.id) {\n      throw new Error(`La app devolvió un apartado inesperado para «${reserva.cliente}».`);\n    }\n    return abonos.map((abono) => ({ apartado_id: apartado.id, cliente: reserva.cliente, ...abono }));\n  });\n}\n\nfunction summarize(total, created, deposits) {\n  const ids = created.map((apartado) => apartado.id);\n  const skipped = total - created.length;\n  return {\n    creados: created.length,\n    omitidos: skipped,\n    abonos_registrados: deposits.length,\n    ids,\n    resultado: created.length === 0\n      ? 'Los datos de demostración ya existen: no se ha creado nada.'\n      : `Datos de demostración cargados: ${created.length} apartados nuevos, ${skipped} ya existían.`,\n  };\n}\n\nif (typeof module !== 'undefined') module.exports = { subtractDays, buildScenarios, dropExisting, planDeposits, summarize };\n\nconst total = $('Build Demo Scenarios').all().length;\nconst created = $('Create Reservation').isExecuted ? $('Create Reservation').all().map((item) => item.json) : [];\nconst deposits = $('Register Deposit').isExecuted ? $('Register Deposit').all() : [];\nreturn [{ json: summarize(total, created, deposits) }];"
+      }
+    }
+  ],
+  "connections": {
+    "Run Demo Data": {
+      "main": [
+        [
+          {
+            "node": "Build Demo Scenarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Demo Scenarios": {
+      "main": [
+        [
+          {
+            "node": "List Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Reservations": {
+      "main": [
+        [
+          {
+            "node": "Drop Existing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop Existing": {
+      "main": [
+        [
+          {
+            "node": "Anything To Create?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything To Create?": {
+      "main": [
+        [
+          {
+            "node": "Create Reservation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Reservation": {
+      "main": [
+        [
+          {
+            "node": "Plan Deposits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Deposits": {
+      "main": [
+        [
+          {
+            "node": "Any Deposits?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Deposits?": {
+      "main": [
+        [
+          {
+            "node": "Register Deposit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register Deposit": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

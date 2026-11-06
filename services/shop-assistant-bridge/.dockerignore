@@ -1,0 +1,6 @@
+__pycache__
+*.pyc
+test_*.py
+setup_secrets.py
+*.sqlite*
+.env*

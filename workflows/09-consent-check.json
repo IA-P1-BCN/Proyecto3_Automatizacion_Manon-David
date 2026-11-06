@@ -1,0 +1,239 @@
+{
+  "id": "pasoFirmeConsentCheck09",
+  "name": "09 Consent Check",
+  "active": false,
+  "nodes": [
+    {
+      "id": "consent-check-1",
+      "name": "When Called By Another Flow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "consent-check-2",
+      "name": "Read Consent Register",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "consentimientos"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "consent-check-3",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 09 · consent decision: pure, shared by the generators and the tests.\n// The register (Data Table `consentimientos`) holds only email, estado, fecha and origen; no name, phone or balance.\n\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\n// Key of the register: trimmed and lowercase. Anything that is not an address gives null.\nfunction normaliseEmail(email) {\n  if (typeof email !== 'string') return null;\n  const clean = email.trim().toLowerCase();\n  return EMAIL_FORMAT.test(clean) ? clean : null;\n}\n\n// `rows` are the register's rows; an item with `error` stands for an unreadable table and blocks the send.\n// With `registrar` (a new reservation with an email) a missing row is created: giving an email in the shop is the consent.\n// A withdrawn row is never overwritten.\nfunction decideConsent(email, rows, { registrar = false, origen = 'tienda', hoy = '' } = {}) {\n  const key = normaliseEmail(email);\n  if (!key) {\n    const empty = typeof email !== 'string' || email.trim() === '';\n    return { permitido: false, razon: empty ? 'sin_email' : 'email_invalido', insertar: null };\n  }\n  if (!Array.isArray(rows) || rows.some((row) => row && row.error)) {\n    return { permitido: false, razon: 'registro_ilegible', insertar: null };\n  }\n  const row = rows.find((candidate) => normaliseEmail(candidate && candidate.email) === key);\n  if (row) {\n    return row.estado === 'activo'\n      ? { permitido: true, razon: 'activo', insertar: null }\n      : { permitido: false, razon: 'consentimiento_retirado', insertar: null };\n  }\n  if (registrar) {\n    return { permitido: true, razon: 'registrado', insertar: { email: key, estado: 'activo', fecha: hoy, origen } };\n  }\n  return { permitido: false, razon: 'sin_consentimiento', insertar: null };\n}\n\n// Backfill: the distinct valid emails of the app's reservations that the register does not hold yet.\nfunction missingConsents(reservations, rows, { hoy = '', origen = 'tienda (migración)' } = {}) {\n  const known = new Set((rows || []).map((row) => normaliseEmail(row && row.email)).filter(Boolean));\n  const result = [];\n  for (const reservation of reservations || []) {\n    const key = normaliseEmail(reservation && reservation.email);\n    if (!key || known.has(key)) continue;\n    known.add(key);\n    result.push({ email: key, estado: 'activo', fecha: hoy, origen });\n  }\n  return result;\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { normaliseEmail, decideConsent, missingConsents };\n}\n\nconst inputs = $('When Called By Another Flow').all();\nconst known = $('Read Consent Register').all().map((item) => item.json).filter((row) => row.error || row.email);\nconst hoy = $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd');\nreturn inputs.map((item) => {\n  const input = item.json;\n  const decision = decideConsent(input.email ?? input.datos?.email, known, { registrar: input.registrar === true, hoy });\n  if (decision.insertar) known.push(decision.insertar);\n  return { json: { ...input, permitido: decision.permitido, razon: decision.razon, insertar: decision.insertar } };\n});"
+      }
+    },
+    {
+      "id": "consent-check-4",
+      "name": "New Consent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "consent-new-1",
+              "leftValue": "={{ $json.insertar != null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "consent-check-5",
+      "name": "Record Consent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "consentimientos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.insertar.email }}",
+            "estado": "={{ $json.insertar.estado }}",
+            "fecha": "={{ $json.insertar.fecha }}",
+            "origen": "={{ $json.insertar.origen }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "origen",
+              "displayName": "origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "consent-check-6",
+      "name": "Return Decisions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Flow 09 · consent decision: pure, shared by the generators and the tests.\n// The register (Data Table `consentimientos`) holds only email, estado, fecha and origen; no name, phone or balance.\n\nconst EMAIL_FORMAT = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\n// Key of the register: trimmed and lowercase. Anything that is not an address gives null.\nfunction normaliseEmail(email) {\n  if (typeof email !== 'string') return null;\n  const clean = email.trim().toLowerCase();\n  return EMAIL_FORMAT.test(clean) ? clean : null;\n}\n\n// `rows` are the register's rows; an item with `error` stands for an unreadable table and blocks the send.\n// With `registrar` (a new reservation with an email) a missing row is created: giving an email in the shop is the consent.\n// A withdrawn row is never overwritten.\nfunction decideConsent(email, rows, { registrar = false, origen = 'tienda', hoy = '' } = {}) {\n  const key = normaliseEmail(email);\n  if (!key) {\n    const empty = typeof email !== 'string' || email.trim() === '';\n    return { permitido: false, razon: empty ? 'sin_email' : 'email_invalido', insertar: null };\n  }\n  if (!Array.isArray(rows) || rows.some((row) => row && row.error)) {\n    return { permitido: false, razon: 'registro_ilegible', insertar: null };\n  }\n  const row = rows.find((candidate) => normaliseEmail(candidate && candidate.email) === key);\n  if (row) {\n    return row.estado === 'activo'\n      ? { permitido: true, razon: 'activo', insertar: null }\n      : { permitido: false, razon: 'consentimiento_retirado', insertar: null };\n  }\n  if (registrar) {\n    return { permitido: true, razon: 'registrado', insertar: { email: key, estado: 'activo', fecha: hoy, origen } };\n  }\n  return { permitido: false, razon: 'sin_consentimiento', insertar: null };\n}\n\n// Backfill: the distinct valid emails of the app's reservations that the register does not hold yet.\nfunction missingConsents(reservations, rows, { hoy = '', origen = 'tienda (migración)' } = {}) {\n  const known = new Set((rows || []).map((row) => normaliseEmail(row && row.email)).filter(Boolean));\n  const result = [];\n  for (const reservation of reservations || []) {\n    const key = normaliseEmail(reservation && reservation.email);\n    if (!key || known.has(key)) continue;\n    known.add(key);\n    result.push({ email: key, estado: 'activo', fecha: hoy, origen });\n  }\n  return result;\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { normaliseEmail, decideConsent, missingConsents };\n}\n\nconst items = $('Decide').all();\nif (items.some((item) => item.json.razon === 'registro_ilegible')) {\n  throw new Error('No se pudo leer el registro de consentimientos: no se envía ningún mensaje a clientes.');\n}\nreturn items.map((item) => {\n  const { insertar, ...decision } = item.json;\n  return { json: decision };\n});"
+      }
+    }
+  ],
+  "connections": {
+    "When Called By Another Flow": {
+      "main": [
+        [
+          {
+            "node": "Read Consent Register",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Consent Register": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "New Consent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Consent?": {
+      "main": [
+        [
+          {
+            "node": "Record Consent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Consent": {
+      "main": [
+        [
+          {
+            "node": "Return Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}

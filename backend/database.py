@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS ventas (
 CREATE TABLE IF NOT EXISTS vales (
   id INTEGER PRIMARY KEY, codigo TEXT UNIQUE NOT NULL, apartado_id INTEGER NOT NULL REFERENCES apartados(id),
   fecha TEXT NOT NULL, importe REAL NOT NULL, usado INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS payment_idempotency (
+  key TEXT PRIMARY KEY NOT NULL, request_hash TEXT NOT NULL,
+  response_json TEXT NOT NULL, notice_fingerprint TEXT);
 """
 
 
@@ -37,6 +40,11 @@ def consultar(sql, *args):
 def crear_tablas():
     with conectar() as con:
         con.executescript(SCHEMA)
+        columns = {row["name"] for row in con.execute("PRAGMA table_info(payment_idempotency)")}
+        if "notice_fingerprint" not in columns:
+            con.execute("ALTER TABLE payment_idempotency ADD COLUMN notice_fingerprint TEXT")
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS payment_notice_fingerprint "
+                    "ON payment_idempotency(notice_fingerprint)")
 
 
 def esta_vacia():

@@ -56,7 +56,7 @@ initial main
 - The merged-PR automation closes referenced issues only after a PR is merged into `dev`; approval alone does not complete an issue. Closed, unmerged PRs must leave issues open. Never bypass human review or merge autonomously.
 - The team board is [IA-P1-BCN Project #43](https://github.com/orgs/IA-P1-BCN/projects/43). Its native `Item closed` workflow must set `Status` to `Done`. After integration, verify both issue closure and board status; report failed automation instead of claiming completion. See `docs/issue-completion-automation.md` for setup, permissions, and bootstrap limitations.
 - Deliveries go from `dev` to `main` through a reviewed PR.
-- Which issue belongs to which flow, owner and branch: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`. The event router has no issue yet; ask the user before starting it.
+- Which issue belongs to which flow, owner and branch: `docs/decisions-clarify.md#branching-model-and-issues-per-flow`. The event router is issue #32 (`feat/32-event-router`, Manon).
 - Claude Code users also have `CLAUDE.md`; shared conventions are in `docs/constitution.md`. If the two ever disagree, fix both in the same PR.
 - Before an authorized commit, inspect status, diff, and recent commit style. Stage only intended files and check for secrets and personal data.
 - Before requesting approval, summarize the changes, verification results, and any blockers. Request permission for the specific pending Git operations.
@@ -67,15 +67,15 @@ Each teammate has an independent local Docker environment containing both the sh
 
 | Integration | Agreed choice |
 | --- | --- |
-| Customer and shop email notifications | Gmail |
-| Bank-notification test input | A dedicated Gmail test mailbox |
-| Daily-closing history | Google Sheets |
+| Customer and shop email notifications | Infomaniak mailbox (SMTP) |
+| Bank-notification test input | The dedicated Infomaniak test mailbox (IMAP) |
+| Daily-closing history | kDrive API, `basedatos.csv` (UTF-8, semicolons, decimal commas); see `docs/daily-close-setup.md` |
 | AI provider inside workflows | Groq; exact model to be selected and documented |
 | Workflow versioning | Exported JSON in Git |
 | Workflow transfer baseline | Manual import/export through the n8n editor |
 | Agent assistance | n8n-mcp, when configured for the local instance |
 
-The test Gmail account must be created and verified by a team member. Never claim an account or integration exists without checking. Separate test accounts and Sheets per teammate are recommended but have not yet been confirmed. If a mailbox is reused, isolate test messages and consumers so the two instances cannot both register the same payment.
+The team's Infomaniak test mailbox must be verified by a team member before relying on it; each n8n instance needs its own SMTP and IMAP credentials, built with a mailbox password generated in Infomaniak. Never claim an account or integration exists without checking. Separate test accounts and Sheets per teammate are recommended but have not yet been confirmed. If a mailbox is reused, isolate test messages and consumers so the two instances cannot both register the same payment.
 
 Current local service addresses:
 
@@ -142,10 +142,10 @@ At the medium level, send reminders at 7 days and 1 day before the deadline only
 
 ## Security and test data
 
-- Keep Gmail/Google OAuth credentials, Groq keys, shop API keys, and n8n management keys in local environment configuration or n8n credentials, never in workflow parameters, tracked files, logs, or PR descriptions.
+- Keep mailbox (SMTP/IMAP) and Google OAuth credentials, Groq keys, shop API keys, and n8n management keys in local environment configuration or n8n credentials, never in workflow parameters, tracked files, logs, or PR descriptions.
 - Use the dedicated test mailbox and controlled test recipients for development. Do not send demo notifications to real customers.
 - Send only the minimum necessary information to Groq and document the external data flow. The advanced level additionally requires authenticated webhooks and consent-aware customer messaging.
-- Google Sheets stores information the app does not already maintain, such as closing history; do not create a competing ledger of balances.
+- kDrive stores closing history the app does not already maintain; do not create a competing ledger of balances. HU-04 replaces its previous Google Sheets plan by explicit user decision. Never write over unrelated files or infer file absence from an API error.
 - Migration must preserve original dates, normalize names/dates/amounts, avoid duplicates on rerun, and report questionable data for Marisa's decision. The sales CSV includes layaway payments already represented in the layaway CSV: do not import them again as direct sales. Skip manually entered total rows.
 
 ## Verification and definition of done

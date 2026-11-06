@@ -1,0 +1,753 @@
+{
+  "name": "07 Monthly Report",
+  "active": false,
+  "nodes": [
+    {
+      "id": "monthly-report-3",
+      "name": "Manual Report Preview",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        240
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "monthly-report-1",
+      "name": "Monthly Day 1 at 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 1 * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "monthly-report-2",
+      "name": "Scheduled Report Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mode",
+              "name": "mode",
+              "value": "scheduled",
+              "type": "string"
+            },
+            {
+              "id": "pdf",
+              "name": "include_pdf",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "scheduled-execution",
+              "name": "scheduled_execution",
+              "value": "={{ $mode === 'trigger' }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "monthly-report-4",
+      "name": "Choose Month and Delivery",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        240
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mode",
+              "name": "mode",
+              "value": "manual",
+              "type": "string"
+            },
+            {
+              "id": "month",
+              "name": "month",
+              "value": "={{ $now.setZone(\"Europe/Madrid\").minus({months:1}).toFormat(\"yyyy-MM\") }}",
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "name": "send_email",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "pdf",
+              "name": "include_pdf",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "monthly-report-5",
+      "name": "Prepare Monthly Period",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst period = reportPeriod(reportGuardInput($input.first().json), $now.setZone('Europe/Madrid').toFormat('yyyy-MM-dd'));\nif (period.send_email) {\n  for (const key of ['TIENDA_EMAIL_FROM', 'TIENDA_EMAIL_AVISOS']) {\n    if (!/^[^\\s<>@,;]+@[^\\s<>@,;]+\\.[^\\s<>@,;]+$/.test(String($env[key] || ''))) throw new Error('Configure una dirección válida en '+key+'.');\n  }\n}\nreturn [{json:{...period, consulted_at:$now.toISO()}}];"
+      }
+    },
+    {
+      "id": "monthly-report-6",
+      "name": "Fetch Monthly Sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/ventas",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Prepare Monthly Period').first().json.desde }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Prepare Monthly Period').first().json.hasta }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "monthly-report-7",
+      "name": "Fetch Monthly Deposits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/abonos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "desde",
+              "value": "={{ $('Prepare Monthly Period').first().json.desde }}"
+            },
+            {
+              "name": "hasta",
+              "value": "={{ $('Prepare Monthly Period').first().json.hasta }}"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "monthly-report-8",
+      "name": "Fetch Current Reservations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/apartados",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "monthly-report-9",
+      "name": "Fetch Payment History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/abonos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "monthly-report-10",
+      "name": "Fetch Vouchers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://tienda:8000/api/vales",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "monthly-report-11",
+      "name": "Calculate Monthly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst period = $('Prepare Monthly Period').first().json;\nconst report = reportCalculate(period, {\n sales:reportResponse($('Fetch Monthly Sales').first().json,'ventas',true),\n deposits:reportResponse($('Fetch Monthly Deposits').first().json,'abonos'),\n reservations:reportResponse($('Fetch Current Reservations').first().json,'apartados',true),\n history:reportResponse($('Fetch Payment History').first().json,'histórico de abonos'),\n vouchers:reportResponse($('Fetch Vouchers').first().json,'vales'),\n},period.consulted_at);\nreturn [{json:{...period,report}}];"
+      }
+    },
+    {
+      "id": "monthly-report-12",
+      "name": "Format Monthly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst input = $input.first().json;\nreturn [{json:{...input,...reportRender(input.report),delivery_requested:reportShouldSend(input,$getWorkflowStaticData('global'))}}];"
+      }
+    },
+    {
+      "id": "monthly-report-13",
+      "name": "Report Email Requested",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "email",
+              "leftValue": "={{ $json.delivery_requested }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "monthly-report-14",
+      "name": "Send Monthly Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2460,
+        -120
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.TIENDA_EMAIL_FROM }}",
+        "toEmail": "={{ $env.TIENDA_EMAIL_AVISOS }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "fileAttachments": "={{ $json.pdf_attached ? 'pdf' : '' }}"
+        }
+      }
+    },
+    {
+      "id": "monthly-report-15",
+      "name": "Record Monthly Delivery",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2680,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst state = $getWorkflowStaticData('global');\nconst period = $('Format Monthly Report').first().json;\nreportRemember(state,period,$input.first().json.messageId);\nconst delivery = $('Report Email Requested').first().json;\nreturn [{json:{month:period.month,report:period.report,email_sent:true,pdf_attached:delivery.pdf_attached===true,pdf_warning:delivery.pdf_warning===true}}];"
+      }
+    },
+    {
+      "id": "monthly-report-16",
+      "name": "Monthly Preview Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        160
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst item = $input.first();\nconst result = item.json;\nreturn [{json:{...result,email_sent:false,delivery_skipped:result.send_email ? 'already_sent_scheduled_period' : 'manual_preview'},...(item.binary ? {binary:item.binary} : {})}];"
+      }
+    },
+    {
+      "id": "monthly-report-17",
+      "name": "PDF Requested",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2020,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pdf",
+              "leftValue": "={{ $json.include_pdf }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "monthly-report-18",
+      "name": "Create PDF Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nconst item = $input.first();\nreturn [{json:item.json,binary:{data:await this.helpers.prepareBinaryData(Buffer.from(item.json.html,'utf8'),'index.html','text/html')}}];"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "monthly-report-19",
+      "name": "Convert Report to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2460,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://monthly-pdf:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "printBackground",
+              "value": "true"
+            },
+            {
+              "name": "preferCssPageSize",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 35000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "file",
+              "outputPropertyName": "pdf"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "monthly-report-20",
+      "name": "Validate PDF Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2680,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\n// Conservative output checks, not a general-purpose PDF parser.\nfunction monthlyPdfValid(bytes, mimeType) {\n  return Buffer.isBuffer(bytes)\n    && bytes.length >= 20 && bytes.length <= 5_000_000\n    && String(mimeType || '').split(';')[0].trim().toLowerCase() === 'application/pdf'\n    && bytes.subarray(0, 5).toString('ascii') === '%PDF-'\n    && bytes.subarray(-1024).toString('ascii').includes('%%EOF');\n}\n\nif (typeof module !== 'undefined') module.exports = { monthlyPdfValid };\n\nconst state = $('Format Monthly Report').first().json;\ntry {\n const item = $input.first();\n if (item.json.statusCode !== 200 || !item.binary?.pdf) throw new Error('pdf_unavailable');\n const bytes = await this.helpers.getBinaryDataBuffer(0,'pdf');\n if (!monthlyPdfValid(bytes,item.binary.pdf.mimeType)) throw new Error('pdf_invalid');\n const pdf = await this.helpers.prepareBinaryData(bytes,state.pdf_filename,'application/pdf');\n return [{json:{...state,pdf_attached:true,pdf_warning:false},binary:{pdf}}];\n} catch (_) {\n return [{json:{...state,...reportRender(state.report,true),pdf_attached:false,pdf_warning:true}}];\n}"
+      }
+    },
+    {
+      "id": "monthly-report-21",
+      "name": "PDF Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        650
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pure monthly report logic. No network, credentials or business writes.\nconst REPORT_METHODS = ['efectivo', 'tarjeta', 'bizum', 'otros'];\n\nfunction reportDate(value) {\n  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) throw new Error('Fecha inválida: se requiere YYYY-MM-DD.');\n  const date = new Date(`${value}T00:00:00Z`);\n  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value < '1900-01-01') throw new Error('Fecha de calendario inválida.');\n  return value;\n}\n\nfunction madridDate(instant) {\n  const date = new Date(instant);\n  if (!Number.isFinite(date.getTime())) throw new Error('Instante de consulta inválido.');\n  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(p => [p.type, p.value]));\n  return reportDate(`${parts.year}-${parts.month}-${parts.day}`);\n}\n\nfunction previousMonth(today) {\n  reportDate(today);\n  const [year, month] = today.split('-').map(Number);\n  return `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`;\n}\n\nfunction reportGuardInput(input) {\n  if (input?.mode === 'scheduled' && input.scheduled_execution !== true) {\n    throw new Error('Inicio programado bloqueado en una prueba manual. Selecciona Manual Report Preview; no se ha enviado ningún correo.');\n  }\n  return input;\n}\n\nfunction reportPeriod(input, today) {\n  reportDate(today);\n  if (!input || !['manual', 'scheduled'].includes(input.mode)) throw new Error('Modo de informe inválido.');\n  for (const key of ['send_email', 'include_pdf']) {\n    if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error(`${key} debe ser booleano.`);\n  }\n  const month = input.mode === 'scheduled' ? previousMonth(today) : input.month;\n  if (typeof month !== 'string' || !/^\\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El mes debe tener formato YYYY-MM.');\n  const from = reportDate(`${month}-01`);\n  if (month >= today.slice(0, 7)) throw new Error('Seleccione un mes ya terminado.');\n  const [year, number] = month.split('-').map(Number);\n  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate();\n  return { mode: input.mode, month, desde: from, hasta: `${month}-${lastDay}`, send_email: input.mode === 'scheduled' || input.send_email === true, include_pdf: input.include_pdf === true };\n}\n\nfunction reportCents(value, positive = false) {\n  if (!['number', 'string'].includes(typeof value) || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(value))) throw new Error('Importe inválido o con más de dos decimales.');\n  const [whole, fraction = ''] = String(value).split('.');\n  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));\n  if (!Number.isSafeInteger(amount) || amount < 0 || (positive && amount === 0)) throw new Error('Importe fuera de rango.');\n  return amount;\n}\n\nfunction reportAdd(a, b) {\n  const value = a + b;\n  if (!Number.isSafeInteger(value)) throw new Error('Total fuera de rango seguro.');\n  return value;\n}\n\nfunction reportList(records, label) {\n  if (!Array.isArray(records)) throw new Error(`La API no devolvió una lista completa: ${label}.`);\n  const seen = new Set();\n  for (const row of records) {\n    if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error(`ID inválido o duplicado: ${label}.`);\n    seen.add(row.id);\n    reportDate(row.fecha);\n  }\n  return records;\n}\n\nfunction reportResponse(response, label, requireTotal = false) {\n  if (response?.statusCode !== 200) throw new Error(`No se pudo consultar la API: ${label}.`);\n  const rows = reportList(response.body, label);\n  const total = Object.entries(response.headers || {}).find(([key]) => key.toLowerCase() === 'x-total-count')?.[1];\n  if ((requireTotal && total === undefined) || (total !== undefined && (!/^\\d+$/.test(String(total)) || Number(total) !== rows.length))) throw new Error(`Respuesta incompleta de la API: ${label}.`);\n  return rows;\n}\n\nfunction reportCalculate(period, sources, consultedAt) {\n  // Validate independently even when called without the n8n HTTP wrapper.\n  const today = madridDate(consultedAt);\n  const expected = reportPeriod({ mode: 'manual', month: period.month }, today);\n  if (period.desde !== expected.desde || period.hasta !== expected.hasta) throw new Error('Límites del periodo inconsistentes.');\n  const inside = value => value >= period.desde && value <= period.hasta;\n  const reservations = reportList(sources.reservations, 'apartados');\n  const history = reportList(sources.history, 'histórico de abonos');\n  const vouchers = reportList(sources.vouchers, 'vales');\n  const byId = new Map(reservations.map(row => [row.id, row]));\n  const latest = new Map();\n  const historicalById = new Map();\n  for (const row of history) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || row.fecha < reservation.fecha || row.fecha > today) throw new Error('Abono histórico sin apartado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Forma de pago ausente en abono histórico.');\n    if (!latest.has(row.apartado_id) || row.fecha > latest.get(row.apartado_id)) latest.set(row.apartado_id, row.fecha);\n    historicalById.set(row.id, row);\n  }\n  const voucherByReservation = new Map();\n  for (const row of vouchers) {\n    const reservation = byId.get(row.apartado_id);\n    if (!reservation || reservation.estado !== 'vencido' || voucherByReservation.has(row.apartado_id) || row.fecha > today || row.fecha < reservation.fecha) throw new Error('Vale sin apartado vencido, duplicado o con fecha inconsistente.');\n    reportCents(row.importe, true);\n    voucherByReservation.set(row.apartado_id, row);\n  }\n  const counts = { nuevos: 0, liquidados: 0, vencidos: 0, activos_actuales: 0 };\n  let pending = 0;\n  for (const row of reservations) {\n    if (!['activo', 'liquidado', 'vencido'].includes(row.estado) || row.fecha > today) throw new Error('Estado o fecha de apartado inválidos.');\n    if (inside(row.fecha)) counts.nuevos++;\n    if (row.estado === 'activo') {\n      pending = reportAdd(pending, reportCents(row.pendiente));\n      counts.activos_actuales++;\n    } else if (row.estado === 'liquidado') {\n      if (!latest.has(row.id)) throw new Error('Apartado liquidado sin fecha de abono verificable.');\n      if (inside(latest.get(row.id))) counts.liquidados++;\n    } else {\n      const voucher = voucherByReservation.get(row.id);\n      if (!voucher) throw new Error('Apartado vencido sin fecha de vale verificable.');\n      if (inside(voucher.fecha)) counts.vencidos++;\n    }\n  }\n  const methods = Object.fromEntries(REPORT_METHODS.map(key => [key, { ventas: 0, abonos: 0, total: 0 }]));\n  const totals = { ventas: 0, abonos: 0, total: 0 };\n  let movementCount = 0;\n  for (const [source, list] of [['ventas', sources.sales], ['abonos', sources.deposits]]) {\n    for (const row of reportList(list, source)) {\n      if (!inside(row.fecha)) throw new Error('Movimiento fuera del mes solicitado.');\n      if (typeof row.forma_pago !== 'string' || !row.forma_pago.trim()) throw new Error('Movimiento sin forma de pago.');\n      if (source === 'abonos') {\n        const original = historicalById.get(row.id);\n        if (!original || ['apartado_id', 'fecha', 'forma_pago'].some(key => row[key] !== original[key]) || reportCents(row.importe, true) !== reportCents(original.importe, true)) throw new Error('Abonos del mes e histórico inconsistentes; repetir la consulta.');\n      }\n      const amount = reportCents(row.importe, true);\n      const method = REPORT_METHODS.includes(row.forma_pago) ? row.forma_pago : 'otros';\n      methods[method][source] = reportAdd(methods[method][source], amount);\n      methods[method].total = reportAdd(methods[method].total, amount);\n      totals[source] = reportAdd(totals[source], amount);\n      movementCount++;\n    }\n  }\n  const monthlyIds = new Set(sources.deposits.map(row => row.id));\n  if (history.some(row => inside(row.fecha) && !monthlyIds.has(row.id))) throw new Error('Listado mensual de abonos incompleto o modificado durante la consulta.');\n  totals.total = reportAdd(totals.ventas, totals.abonos);\n  return { month: period.month, desde: period.desde, hasta: period.hasta, consulted_at: new Date(consultedAt).toISOString(), methods, totals, pending_cents: pending, counts, movement_count: movementCount };\n}\n\nfunction reportEscape(value) {\n  return String(value).replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[char]);\n}\n\nfunction reportMoney(cents) {\n  if (!Number.isSafeInteger(cents) || cents < 0) throw new Error('Importe de presentación inválido.');\n  return `${Math.floor(cents / 100).toLocaleString('es-ES')},${String(cents % 100).padStart(2, '0')} €`;\n}\n\nfunction reportRender(report, pdfWarning = false) {\n  const date = new Date(`${report.month}-01T12:00:00Z`);\n  const monthLabel = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }).format(date);\n  const consulted = new Intl.DateTimeFormat('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.consulted_at));\n  const e = reportEscape;\n  const money = value => e(reportMoney(value));\n  const label = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum (incluye transferencias)', otros: 'Otros métodos' };\n  const rows = REPORT_METHODS.map(key => `<tr><th scope=\"row\">${label[key]}</th><td>${money(report.methods[key].ventas)}</td><td>${money(report.methods[key].abonos)}</td><td>${money(report.methods[key].total)}</td></tr>`).join('');\n  const body = `<h1>Paso Firme · Informe mensual</h1><h2>${e(monthLabel)}</h2>\n<p>Periodo: ${e(report.desde.split('-').reverse().join('/'))} – ${e(report.hasta.split('-').reverse().join('/'))} (Europe/Madrid).</p>\n${report.movement_count ? '' : '<p><strong>No hubo movimientos en este mes.</strong></p>'}\n<h2>Dinero cobrado durante el mes</h2><table><thead><tr><th>Forma de pago</th><th>Ventas directas</th><th>Abonos</th><th>Total cobrado</th></tr></thead><tbody>${rows}<tr><th>Total</th><td>${money(report.totals.ventas)}</td><td>${money(report.totals.abonos)}</td><td><strong>${money(report.totals.total)}</strong></td></tr></tbody></table>\n<p>Los abonos incluyen los iniciales una sola vez. Bizum incluye transferencias. Estos importes son cobros, no beneficios.</p>\n<h2>Pendiente de cobro actual: ${money(report.pending_cents)}</h2><p>${report.counts.activos_actuales} apartados activos. Consultado el ${e(consulted)} (Europe/Madrid). Es el saldo actual de la consulta, no el saldo histórico al cierre del mes.</p>\n<h2>Apartados del mes</h2><table><thead><tr><th>Nuevos</th><th>Liquidados</th><th>Vencidos</th></tr></thead><tbody><tr><td>${report.counts.nuevos}</td><td>${report.counts.liquidados}</td><td>${report.counts.vencidos}</td></tr></tbody></table>\n<p><strong>Cómo se cuentan:</strong> nuevos por fecha de creación; liquidados (totalmente pagados) por la fecha del último abono de los que ahora constan como liquidados; vencidos por la fecha del vale emitido al cerrarlos, no por su fecha límite.</p>\n<p>La app no guarda una fecha específica de liquidación. Los pagos antiguos importados se atribuyen a su fecha contable y pueden modificar informes anteriores. Liquidado no significa que los zapatos se hayan recogido. Las consultas no son una fotografía simultánea de toda la app.</p>\n${pdfWarning ? '<p><strong>Aviso: no se ha podido generar el PDF. La tabla de este correo contiene el informe completo.</strong></p>' : ''}`;\n  const html = `<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Informe mensual ${e(report.month)}</title><style>body{font:14px Arial,sans-serif;color:#203040;line-height:1.5;max-width:850px;margin:24px auto;padding:12px}h1{color:#195b58}h2{font-size:18px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:9px;border:1px solid #ccd8da;text-align:right}th{background:#edf5f4}th:first-child{text-align:left}tr{break-inside:avoid}@page{size:A4;margin:15mm}h2{break-after:avoid}</style></head><body>${body}</body></html>`;\n  return { subject: `Paso Firme · Informe mensual — ${monthLabel}`, html, pdf_filename: `paso-firme-monthly-report-${report.month}.pdf` };\n}\n\nfunction reportShouldSend(period, state) {\n  return period.send_email === true && !(period.mode === 'scheduled' && state?.sent_months?.[period.month]);\n}\n\nfunction reportRemember(state, period, messageId) {\n  if (typeof messageId !== 'string' || !messageId.trim()) throw new Error('SMTP no confirmó el envío; revisar antes de repetir.');\n  if (period.mode === 'scheduled') {\n    state.sent_months ||= {};\n    state.sent_months[period.month] = true;\n  }\n}\n\nif (typeof module !== 'undefined') module.exports = { REPORT_METHODS, reportDate, madridDate, previousMonth, reportGuardInput, reportPeriod, reportCents, reportAdd, reportResponse, reportCalculate, reportEscape, reportMoney, reportRender, reportShouldSend, reportRemember };\n\nreturn [{json:{...$input.first().json,pdf_attached:false,pdf_warning:false}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Monthly Day 1 at 09:00": {
+      "main": [
+        [
+          {
+            "node": "Scheduled Report Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled Report Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Monthly Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Report Preview": {
+      "main": [
+        [
+          {
+            "node": "Choose Month and Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Month and Delivery": {
+      "main": [
+        [
+          {
+            "node": "Prepare Monthly Period",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Monthly Period": {
+      "main": [
+        [
+          {
+            "node": "Fetch Monthly Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Monthly Sales": {
+      "main": [
+        [
+          {
+            "node": "Fetch Monthly Deposits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Monthly Deposits": {
+      "main": [
+        [
+          {
+            "node": "Fetch Current Reservations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Current Reservations": {
+      "main": [
+        [
+          {
+            "node": "Fetch Payment History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Payment History": {
+      "main": [
+        [
+          {
+            "node": "Fetch Vouchers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Vouchers": {
+      "main": [
+        [
+          {
+            "node": "Calculate Monthly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Monthly Report": {
+      "main": [
+        [
+          {
+            "node": "Format Monthly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Monthly Report": {
+      "main": [
+        [
+          {
+            "node": "PDF Requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Email Requested": {
+      "main": [
+        [
+          {
+            "node": "Send Monthly Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Monthly Preview Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Monthly Report": {
+      "main": [
+        [
+          {
+            "node": "Record Monthly Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF Requested": {
+      "main": [
+        [
+          {
+            "node": "Create PDF Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PDF Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create PDF Input": {
+      "main": [
+        [
+          {
+            "node": "Convert Report to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Report to PDF": {
+      "main": [
+        [
+          {
+            "node": "Validate PDF Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate PDF Result": {
+      "main": [
+        [
+          {
+            "node": "Report Email Requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF Skipped": {
+      "main": [
+        [
+          {
+            "node": "Report Email Requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid"
+  }
+}
